@@ -284,6 +284,15 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   waypoint corrects part of the offset at most steps; the anti-correction is
   specific to the peg C grasp approach. The client default is back to 1.
   Twelve runs of saved observations now exist for the fine-tune.
+- Comparison baseline (September 18): a pi0.5 checkpoint trained on the same
+  waypoint_v4 dataset (`pi05_hanoi_waypoint_aaaa_to_cccc`, export 29999,
+  validation first-waypoint error 0.47 mm mean) is served by
+  `examples/hanoi/deployment/serve_waypoint.py` in the OpenPI checkout on
+  port 8000 and driven by the same client with the same start pose, joint
+  check and commit-one execution (`--server ws://127.0.0.1:8000`). Its
+  contract is identical to this policy's deployment contract; inference is
+  about 0.1 s against 0.48 s here. Replay from the v4 start predicts the
+  hover over A within 1.3 mm.
 - This is the policy's real-world precision as it stands: about 1 mm offline,
   3 to 4 mm live, against a grasp tolerance of about 3 mm. The client executes
   the raw output by default. The server publishes the 18 recorded destinations
