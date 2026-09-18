@@ -239,9 +239,23 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   0.5 mm. It was then stopped by the pi0.5-derived workspace ceiling, which the
   lift-away exceeded by 0.07 mm. The client now uses bounds derived from this
   policy's labels.
-- Live destinations sit 2 to 4 mm outside the recorded label range (hover 2 to
-  3 mm high, carry x 3.6 mm low). This is the stopped-observation shift, and it
-  did not prevent the transfer.
+- Run 3 completed move 1 the same way, then missed the second grasp: hovers were
+  predicted 1.5 to 3.6 mm high and the grasp 3.5 mm above the ring level (81.0
+  versus 77.5 mm), a 16.9 mm edge grip that slipped on the lift. Run 4 started
+  from a non-reset board and missed outright. Joint states at these decisions
+  are within 0.02 rad of training, so this is not the stopped-observation
+  shift. It is small per-step bias accumulating through the relative XYZ
+  encoding: each destination is predicted relative to the measured position,
+  so a hover that is 3 mm high yields a grasp that is 3 mm high. Grasp x is
+  3.6 mm off in every run for the same reason: the shared rod-A start pose
+  comes from the September 10 recording, and "descend straight down"
+  inherits that offset.
+- Fix in the client, not the model: the server now publishes the 18 recorded
+  destinations and the client snaps each committed destination onto that grid
+  (hovers by height only, releases to the nearest point, grasps to the nearest
+  peg column then the nearest ring level), and stops if a grasp height is
+  ambiguous between levels. The model's job reduces to choosing the point,
+  which it did correctly in all four runs.
 
 Not known: a full episode on hardware; behaviour if the board state is not one
 seen in the 50 recorded episodes; recovery after a failed grasp.

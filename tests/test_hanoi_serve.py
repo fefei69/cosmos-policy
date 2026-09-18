@@ -98,8 +98,14 @@ def test_metadata_carries_contract_and_hashes(tmp_path):
     (metadata_dir / "dataset_statistics.json").write_text("{}")
     (metadata_dir / "metadata.json").write_text(json.dumps(
         {"contract": "hanoi_waypoint_v4_cosmos_v1", "deployment": {"version": 4, "action_horizon": 8}}))
+    actions = np.zeros((3, 8, 4), np.float32)
+    actions[:, :, :3] = [0.4961, -0.0572, 0.0877]
+    actions[1, 2, :3] = [0.4926, -0.0562, 0.19110004]  # rounds onto the same 0.1 mm grid point
+    actions[2, 5, :3] = [0.4926, -0.0562, 0.1911]
+    np.savez(metadata_dir / "train.npz", actions=actions)
     identity = build_metadata(export, metadata_dir, seed=1, denoising_steps=5, gpu="test")["cosmos_hanoi"]
     assert identity["contract"] == {"version": 4, "action_horizon": 8}
+    assert identity["destinations"] == [[0.4926, -0.0562, 0.1911], [0.4961, -0.0572, 0.0877]]
     assert identity["export_sha256"] == __import__("hashlib").sha256(b"weights").hexdigest()
     assert identity["statistics_sha256"] == __import__("hashlib").sha256(b"{}").hexdigest()
     assert identity["training_identity"]["max_updates"] == 8000 and identity["commit_count"] == 1

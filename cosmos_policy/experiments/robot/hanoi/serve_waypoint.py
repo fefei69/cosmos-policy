@@ -201,8 +201,23 @@ def sha256_file(path: Path) -> str:
     return sha256(path)
 
 
+def destination_grid(metadata_dir: Path) -> list:
+    """Every recorded destination in the training labels (18 points for waypoint_v4), 0.1 mm resolution.
+
+    The client snaps each committed destination onto this grid: the policy picks the right
+    point but carries a few millimetres of bias, and the relative XYZ encoding would otherwise
+    let that bias accumulate from one waypoint to the next.
+    """
+    with np.load(metadata_dir / "train.npz", allow_pickle=False) as archive:
+        xyz = archive["actions"][:, :, :3].reshape(-1, 3).astype(np.float64)
+    points = np.unique(np.round(xyz, 4), axis=0)
+    if not 2 <= len(points) <= 64 or not np.isfinite(points).all():
+        raise ValueError(f"Unexpected destination grid: {len(points)} points")
+    return points.tolist()
+
+
 def build_metadata(checkpoint: Path, metadata_dir: Path, *, seed: int, denoising_steps: int, gpu: str) -> dict:
-    """Identity the client verifies before moving: contract, hashes, sampling settings."""
+    """Identity the client verifies before moving: contract, hashes, sampling settings, destination grid."""
     prepared = json.loads((metadata_dir / "metadata.json").read_text())
     run = checkpoint.resolve().parent.parent
     training = json.loads((run / "joint_contract.json").read_text())
@@ -217,6 +232,7 @@ def build_metadata(checkpoint: Path, metadata_dir: Path, *, seed: int, denoising
             "training_identity": {
                 key: training[key] for key in ("contract", "statistics_sha256", "raw_sha256", "max_updates")
             },
+            "destinations": destination_grid(metadata_dir),
             "seed": seed,
             "num_denoising_steps": denoising_steps,
             "commit_count": 1,
