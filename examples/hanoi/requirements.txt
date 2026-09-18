@@ -1,3 +1,6 @@
 # The raw collection's Boolean attributes require an HDF5 2.0 reader.
 # Apply after the upstream uv sync; keep the CUDA stack pinned by uv.lock.
 h5py==3.16.0
+# The waypoint policy server (serve_waypoint.py) speaks the OpenPI WebSocket protocol.
+websockets==15.0.1
+msgpack==1.2.2

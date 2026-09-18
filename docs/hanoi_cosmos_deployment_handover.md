@@ -17,12 +17,17 @@ what establishes that.
 | `cosmos_policy/experiments/robot/hanoi/run_hanoi_physical_eval.py` | Offline evaluation and serving-parity check (cluster only; section 6 has the deployment-machine variant) |
 | `examples/hanoi/dream_local.py` | Parity and future-frame check on any CUDA GPU, from a single-episode extract |
 | `data/hanoi_cosmos/waypoint_v4/metadata.json` | The full contract under `deployment` (crop, frame, jaw parameters, timing) |
-| OpenPI `docs/hanoi_deployment_handoff.md` | The robot-side executor this policy is meant to plug into |
+| `cosmos_policy/experiments/robot/hanoi/serve_waypoint.py` | Policy server: wraps `HanoiWaypointPolicy.infer` behind the OpenPI WebSocket protocol |
+| OpenPI `examples/hanoi/deployment/cosmos_client.py` | The robot-side client (camera, arm, watchdogs, recovery) that calls the server |
+| OpenPI `docs/hanoi_deployment_handoff.md` | The robot-side executor contract this policy plugs into |
 
 Do not modify `waypoint_policy.py`, `joint_policy.py`, `cosmos_utils.py` or the
 dataset modules on the hardware branch. The serving-parity check compares the
 adapter with offline inference; changing them silently invalidates that check.
-Put robot I/O in a new module that calls `HanoiWaypointPolicy.infer`.
+Robot I/O lives in the OpenPI checkout as `examples/hanoi/deployment/cosmos_client.py`
+(launcher `run_cosmos_client.sh`), which cannot import this package: the ROS and
+Trossen environment is Python 3.12 and this one is 3.10. It talks to
+`serve_waypoint.py`, which calls `HanoiWaypointPolicy.infer` and nothing else.
 
 ## 2. Artifacts
 
@@ -120,7 +125,23 @@ given observation on a given GPU; the offline evaluator uses seed 1 and the
 parity check asserts equality. Across GPUs the outputs are close but not
 bit-identical (different attention and RoPE kernels): the same six episode-40
 observations scored within 0.06 mm of the H200 evaluation on the 5080, with
-identical jaw intents.
+identical jaw intents. Two processes on the same 5080 differ by up to 0.2 mm
+(bf16 variation); within one process the output is bit-identical.
+
+### Serving
+
+```bash
+source examples/hanoi/env.sh && export COSMOS_POLICY_PLATFORM=hanoi_joint
+.venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_waypoint --port 8001
+```
+
+The server loads the export, hashes it, warms the model once, then serves. On
+connect it sends `{"cosmos_hanoi": {contract, export_sha256, statistics_sha256,
+seed, num_denoising_steps, commit_count, gpu}}`; the client refuses any other
+contract or export. Each request carries the three observation keys above; each
+reply is `{"actions": (8, 4), "commit_count": 1, "server_timing"}`. Requests
+are validated before inference; a failure returns the traceback as text and
+closes the connection. Port 8001 leaves the pi0.5 server on 8000 untouched.
 
 ## 4. Observation contract
 
@@ -163,7 +184,11 @@ documented in both label sets and unmeasured on hardware.
    Compare its per-sample `first_target_xyz_mm` with the same rows in
    `<run>/selected_validation.json` (episode 40 starts at raw row 288040).
    Done on the RTX 5080 for `iter_000008000.pt`: six of six within 0.06 mm,
-   jaw intents identical, all six first targets within 5 mm.
+   jaw intents identical, all six first targets within 5 mm. Wire parity is
+   checked by replaying the same rows through the server from the robot
+   environment (`./run_cosmos_client.sh --mode replay --replay-rows 0 1443 2880
+   4258 5700 7138`, in the OpenPI checkout): identical across two client runs
+   against one server, within 0.2 mm of the offline process.
 2. **Capture-path replay.** Feed recorded validation observations through the
    robot-side capture, crop and state code, then through `infer`, and compare
    with offline predictions for the same rows. The evaluators store per-sample
@@ -171,11 +196,15 @@ documented in both label sets and unmeasured on hardware.
    `predicted_targets_abs` entries in `dream_local.py`'s `report.json` (use
    `--samples 90` for every validation row of the extract). Catches BGR/RGB,
    crop offset, unit and joint-order mistakes before any motion.
-3. **Static prediction check.** From the robot's actual start pose and a real
-   camera frame, print the predicted first destination and jaw intent and check
-   by eye that it is the expected first ring pickup.
-4. **Supervised motion** at reduced speed with the stop within reach: one ring
-   transfer, then one full episode. Record placement error at every stop.
+3. **Static prediction check.** `./run_cosmos_client.sh --mode shadow` reads the
+   real camera and arm, logs every prediction to `events.jsonl`, and never moves.
+   From the rod-A start pose, check by eye that row 0 is the expected first ring
+   pickup with jaw intent 1.
+4. **Supervised motion** at reduced speed with the stop within reach:
+   `./run_cosmos_client.sh --duration-s 90` for one ring transfer, then a longer
+   run for one full episode. Moves are rest-to-rest at half speed; a jaw change
+   waits for arrival; stroke at or below 8 mm during a closed grip stops the run
+   and returns home; Ctrl-C holds and opens. Record placement error at every stop.
 5. Only then compare against tolerance and decide whether the stopped-observation
    shift needs a short on-robot fine-tune (the v4 importer accepts a new audit
    file without code changes).
