@@ -93,6 +93,44 @@ error is nearly all-or-nothing per sample; read the hit rate first.
 Job 17929390 runs this evaluator over every joint_v3 export on the full
 validation split, writing to `data/hanoi_cosmos/evals/hanoi_cosmos_joint_sparse_20260917/physical_val/`.
 
+## Results (run completed September 18, 01:08 EDT, 5 h 45 min on one H200)
+
+Physical validation per export, all 445 held-out examples, first target within
+5 mm with correct jaw intent:
+
+| Step | Hit rate | Mean XYZ error | p95 |
+|---|---|---|---|
+| 1,000 | 68.5% | 4.6 mm | 9.9 mm |
+| 2,000 | 98.7% | 1.5 mm | 3.4 mm |
+| 3,000 | 97.8% | 1.8 mm | 3.9 mm |
+| 4,000 | 100% | 1.45 mm | 3.2 mm |
+| 5,000 | 100% | 1.0 mm | 1.9 mm |
+| 6,000 | 99.8% | 0.81 mm | 1.5 mm |
+| 7,000 | 97.8% | 1.3 mm | 3.4 mm |
+| 8,000 | 100% | 0.77 mm | 1.8 mm |
+
+Jaw intent was 100% correct from step 1,000 on. No example missed in more than
+one export after step 2,000, and every miss after step 3,000 was a 5 to 9 mm
+precision miss, never a wrong destination.
+
+Selected: `exports/iter_000008000.pt` (`selection.json`). Locked before any
+test access.
+
+| Split | Examples | Hit rate | Mean | Median | p95 | Jaw, all slots | Serving parity |
+|---|---|---|---|---|---|---|---|
+| validation | 445 | 100% | 0.76 mm | 0.69 mm | 1.76 mm | 100% | passed |
+| test | 450 | 100% | 0.76 mm | 0.67 mm | 1.85 mm | 100% | passed |
+
+Every validation and test episode individually scores 100%. Mean error over
+all eight valid targets is 0.75 mm. These are offline imitation metrics on
+episodes from the same recording session; nothing on hardware is measured.
+
+Future-frame check (`examples/hanoi/predict_future_images.py`, 24 examples):
+the step 2,000 export predicts the frame after the eighth target, about 20 s
+ahead, at 35.6 dB PSNR, better than copying the current frame on every
+example; the joint_v3 step 16,000 export averages 22 dB with the arm rendered
+at the wrong peg in a third of cases.
+
 ## Scheduling note
 
 `h100_tandon` is capped by a 60-GPU group limit (`QOSGrpGRES`), so one-GPU jobs

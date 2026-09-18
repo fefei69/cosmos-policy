@@ -23,9 +23,8 @@ Put robot I/O in a new module that calls `HanoiWaypointPolicy.infer`.
 
 ## 2. Artifacts
 
-Available when run `hanoi_cosmos_waypoint_v4_20260917` finishes (about 01:15 on
-September 18), or earlier from any export listed in
-`<run>/evaluation/iter_*_validation_actions.json`.
+Run `hanoi_cosmos_waypoint_v4_20260917` completed September 18, 01:08 EDT.
+`selection.json` names `exports/iter_000008000.pt`.
 
 | Artifact | Path on the cluster |
 |---|---|
@@ -134,10 +133,13 @@ Known (offline, 445 held-out validation examples, waypoint_v4):
 
 | Export | Hit rate (5 mm, correct jaw) | Mean first-target error | p95 |
 |---|---|---|---|
-| step 1,000 | 68.5% | 4.6 mm | 9.9 mm |
 | step 2,000 | 98.7% | 1.5 mm | 3.4 mm |
+| step 5,000 | 100% | 1.0 mm | 1.9 mm |
+| **step 8,000, selected** | **100%** | **0.76 mm** | **1.76 mm** |
 
-Later exports are appended to `<run>/evaluation/` as the run progresses.
+Test split, 450 examples from five unseen episodes, same export: 100% hit rate,
+0.76 mm mean, 1.85 mm p95, jaw intent 100%, serving parity passed. Full per-export
+table in `docs/hanoi_cosmos_waypoint_v4.md`.
 
 Not known: anything on hardware; behaviour when the arm is stopped at
 observation time; behaviour if the board state is not one seen in the 50
