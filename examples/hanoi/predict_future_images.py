@@ -19,7 +19,7 @@ import time
 
 import numpy as np
 
-ACCEPTED_GPUS = ('H100', 'H200')
+ACCEPTED_GPUS = ('H100', 'H200', 'A100')  # any 40 GB+ Ampere/Hopper card suffices for inference
 
 
 def psnr(a, b):
@@ -57,7 +57,7 @@ def main():
 
     gpu = torch.cuda.get_device_name() if torch.cuda.device_count() else 'none'
     if torch.cuda.device_count() != 1 or not any(tag in gpu for tag in ACCEPTED_GPUS):
-        raise RuntimeError(f'Run on one H100 or H200, not {gpu!r} x{torch.cuda.device_count()}')
+        raise RuntimeError(f'Run on one H100, H200 or A100, not {gpu!r} x{torch.cuda.device_count()}')
     contract = json.loads((args.metadata / 'metadata.json').read_text())['contract']
     dataset_class = {JOINT_CONTRACT: HanoiJointDataset, WAYPOINT_CONTRACT: HanoiWaypointDataset}[contract]
     cfg = inference_config_for(contract, args.checkpoint, args.metadata / 'dataset_statistics.json', args.embeddings)
