@@ -29,7 +29,7 @@ Run `hanoi_cosmos_waypoint_v4_20260917` completed September 18, 01:08 EDT.
 | Artifact | Path on the cluster |
 |---|---|
 | Run directory | `data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_waypoint_v4_20260917/` |
-| Selected export | `selection.json` names it; exports are `exports/iter_*.pt` (3.9 GB each) |
+| Selected export | `exports/iter_000008000.pt` (3.7 GB), named in `selection.json` |
 | Contract identity | `joint_contract.json` in the run directory; the loader reads it from two levels above the export, so **copy the run directory layout**, not the `.pt` alone |
 | Normalization | `data/hanoi_cosmos/waypoint_v4/dataset_statistics.json` (hash is checked against the contract) |
 | Prompt embedding | `data/hanoi_cosmos/t5_embeddings.pkl` (no T5 encoder is needed at runtime) |
@@ -129,17 +129,17 @@ documented in both label sets and unmeasured on hardware.
 
 ## 7. What is known and what is not
 
-Known (offline, 445 held-out validation examples, waypoint_v4):
+Known (offline, waypoint_v4, selected export `iter_000008000.pt`, run completed
+September 18, 2026):
 
-| Export | Hit rate (5 mm, correct jaw) | Mean first-target error | p95 |
-|---|---|---|---|
-| step 2,000 | 98.7% | 1.5 mm | 3.4 mm |
-| step 5,000 | 100% | 1.0 mm | 1.9 mm |
-| **step 8,000, selected** | **100%** | **0.76 mm** | **1.76 mm** |
+| Split | n | Hit rate (5 mm, correct jaw) | Mean first-target error | p95 | Worst |
+|---|---|---|---|---|---|
+| validation | 445 | 100% | 0.76 mm | 1.76 mm | 2.79 mm |
+| test | 450 | 100% | 0.76 mm | 1.85 mm | 3.05 mm |
 
-Test split, 450 examples from five unseen episodes, same export: 100% hit rate,
-0.76 mm mean, 1.85 mm p95, jaw intent 100%, serving parity passed. Full per-export
-table in `docs/hanoi_cosmos_waypoint_v4.md`.
+Jaw intent is 100% correct on both splits, first target and all eight slots.
+Serving parity passed on both. Per-export numbers for all eight exports are in
+`<run>/evaluation/`; see `docs/hanoi_cosmos_waypoint_v4.md`.
 
 Not known: anything on hardware; behaviour when the arm is stopped at
 observation time; behaviour if the board state is not one seen in the 50
