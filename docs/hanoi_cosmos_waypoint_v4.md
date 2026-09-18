@@ -131,37 +131,6 @@ ahead, at 35.6 dB PSNR, better than copying the current frame on every
 example; the joint_v3 step 16,000 export averages 22 dB with the arm rendered
 at the wrong peg in a third of cases.
 
-## Results (job 17929493, completed September 18, 2026, 01:08 EDT, 5.7 h wall)
-
-Physical validation on all 445 held-out examples after each export (first
-target within 5 mm with correct jaw intent = hit):
-
-| Step | Hit rate | Mean first-target error |
-|---|---|---|
-| 1,000 | 68.5% | 4.62 mm |
-| 2,000 | 98.7% | 1.50 mm |
-| 3,000 | 97.8% | 1.84 mm |
-| 4,000 | 100% | 1.45 mm |
-| 5,000 | 100% | 1.00 mm |
-| 6,000 | 99.8% | 0.81 mm |
-| 7,000 | 97.8% | 1.31 mm |
-| 8,000 | 100% | 0.77 mm |
-
-Selected: `exports/iter_000008000.pt` (100% hit rate, lowest mean error).
-Selection was locked before the test split was read.
-
-| Split | Examples | Hit rate | Mean | Median | p95 | Max | First jaw | All-slot jaw balanced acc. |
-|---|---|---|---|---|---|---|---|---|
-| Validation | 445 | 100% | 0.76 mm | 0.69 mm | 1.76 mm | 2.79 mm | 100% | 100% |
-| Test | 450 | 100% | 0.76 mm | 0.67 mm | 1.85 mm | 3.05 mm | 100% | 100% |
-
-Every held-out episode scores 100%. Grasp targets average 1.16 mm and
-release targets 0.75 mm on both splits. Serving parity passed on both. Speed
-was 2.15 s per update on the H200 (peak allocated 28 GB, reserved 124 GB).
-For comparison, on the joint_v3 labels OpenPI's mean first-target error never
-fell below 10 mm. These remain offline imitation metrics under the
-moving-observation approximation; hardware success is unmeasured.
-
 ## Scheduling note
 
 `h100_tandon` is capped by a 60-GPU group limit (`QOSGrpGRES`), so one-GPU jobs
