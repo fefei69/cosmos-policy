@@ -250,6 +250,19 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   3.6 mm off in every run for the same reason: the shared rod-A start pose
   comes from the September 10 recording, and "descend straight down"
   inherits that offset.
+- Re-analysed September 18 with two more raw runs (5 and 6), which reproduce
+  runs 2 and 3 step for step. The x error is a start-pose mismatch, not
+  drift: the rod-A hover (492.6, -56.2, 191.1) is a carry pose in
+  waypoint_v4 (238 training windows begin there, none precedes a grasp),
+  and the grasp hover over A is at x = 496.1 mm. All 40 v4 episodes start
+  at (414.0, 15.8, 191.2) behind peg B, and from there replay predicts the
+  hover over A within 0.5 mm of the column. The height error does compound,
+  partially: regressing each step's error on the offset the arm started from
+  gives a slope of about 0.6 in y and z, plus under 1 mm of upward bias per
+  step, reaching +3.8 mm at the second grasp. The OpenPI client now starts
+  at the recorded v4 start (`--start-xyz-m`) and checks the start joints
+  against the recorded ones (`start_joints_verified`); the compounding part
+  is still open and is what the fine-tune below addresses.
 - This is the policy's real-world precision as it stands: about 1 mm offline,
   3 to 4 mm live, against a grasp tolerance of about 3 mm. The client executes
   the raw output by default. The server publishes the 18 recorded destinations
@@ -264,7 +277,8 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   from a slightly displaced stopped arm instead of replaying the recorded
   displacement.
 
-Not known: a full episode on hardware; behaviour if the board state is not one
+Not known: a full episode on hardware; how much height drift remains once
+the chain starts from the recorded start pose; behaviour if the board state is not one
 seen in the 50 recorded episodes; recovery after a failed grasp.
 
 ## 8. World-model head check
