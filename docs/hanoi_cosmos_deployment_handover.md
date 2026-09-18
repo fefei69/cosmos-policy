@@ -263,6 +263,21 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   at the recorded v4 start (`--start-xyz-m`) and checks the start joints
   against the recorded ones (`start_joints_verified`); the compounding part
   is still open and is what the fine-tune below addresses.
+- Runs 7 to 9 (v4 start pose, dreams saved from run 8 on): four moves
+  completed, then the same fifth grasp on peg C missed, within 2 mm of
+  each other at every step. Offline the export is precise on the validation
+  episode (under 1 mm at most steps, 2.5 mm at worst, jaw intent 90/90); its
+  weakest step is the hover-B-to-grasp-hover-C transition of move 5, one of
+  the rarest in the data (40 examples against 280 for A-side hovers). Live,
+  the arm reaches that hover 3 to 4 mm off after releasing the big ring, and
+  from an off-column hover the model anti-corrects: from 4.7, 5.5 and 6.6 mm
+  off it descended 3.0, 3.1 and 3.7 mm further off and 3 to 6 mm too high.
+  Training poses never leave their grid point by more than 1 mm, so this is
+  coverage, not imbalance. The model's chunks are consistent (positions 1 to
+  7 as accurate as position 0), so the OpenPI client now executes three
+  waypoints per observation (`--commit-count`, adapter name
+  `cosmos_waypoint_v4_commit_3_rest_to_rest`); re-planning at every waypoint
+  is what fed the drift.
 - This is the policy's real-world precision as it stands: about 1 mm offline,
   3 to 4 mm live, against a grasp tolerance of about 3 mm. The client executes
   the raw output by default. The server publishes the 18 recorded destinations
