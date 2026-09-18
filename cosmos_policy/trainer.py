@@ -21,6 +21,7 @@ This trainer extends the base ImaginaireTrainer to add:
 """
 
 import signal
+from pathlib import Path
 
 import torch
 import torch.utils.data
@@ -29,6 +30,11 @@ from cosmos_policy._src.imaginaire.model import ImaginaireModel
 from cosmos_policy._src.imaginaire.trainer import ImaginaireTrainer
 from cosmos_policy._src.imaginaire.utils import distributed, log, misc
 from cosmos_policy._src.imaginaire.utils.profiling import maybe_enable_memory_snapshot, maybe_enable_profiling
+from cosmos_policy.datasets.resumable_sampler import (
+    ResumableDistributedSampler,
+    check_data_order_contract,
+    make_data_order_contract,
+)
 
 
 class CosmosPolicyTrainer(ImaginaireTrainer):
@@ -68,6 +74,29 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
         # Load the model checkpoint and get the starting iteration number.
         iteration = self.checkpointer.load(model, optimizer, scheduler, grad_scaler)
         grad_accum_iter = 0
+        epoch = 0
+        resume_sample_offset = 0
+        if isinstance(dataloader_train.sampler, ResumableDistributedSampler):
+            contract = make_data_order_contract(
+                dataloader_train, self.config.trainer.grad_accum_iter, self.config.trainer.seed
+            )
+            contract_path = Path(self.config.job.path_local) / "data_order.json"
+            if distributed.is_rank0():
+                check_data_order_contract(contract_path, contract, allow_create=iteration == 0)
+            distributed.barrier()
+            check_data_order_contract(contract_path, contract, allow_create=False)
+            epoch, batch_offset = dataloader_train.sampler.resume_from_iteration(
+                iteration,
+                self.config.trainer.grad_accum_iter,
+                dataloader_train.batch_size,
+                dataloader_train.drop_last,
+            )
+            resume_sample_offset = dataloader_train.sampler.start_index
+            log.info(
+                f"Restored data order: epoch={epoch}, batch_offset={batch_offset}, "
+                f"samples_skipped_per_rank={resume_sample_offset}, "
+                f"full_epoch_batches={contract['full_epoch_batches']}"
+            )
         log.critical(f"Distributed parallelism mode: {self.config.trainer.distributed_parallelism}")
         if self.config.trainer.distributed_parallelism == "ddp":
             # Create a DDP model wrapper.
@@ -87,9 +116,11 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
             maybe_enable_profiling(self.config, global_step=iteration) as torch_profiler,
             maybe_enable_memory_snapshot(self.config, global_step=iteration) as memory_profiler,
         ):
-            epoch = 0
             while True:
                 dataloader_train.sampler.set_epoch(epoch)
+                if isinstance(dataloader_train.sampler, ResumableDistributedSampler):
+                    dataloader_train.sampler.set_start_index(resume_sample_offset)
+                    resume_sample_offset = 0  # Subsequent epochs begin at their first batch.
                 dataloader_train_iter = iter(dataloader_train)
                 while True:
                     self.callbacks.on_before_dataloading(iteration)
@@ -141,6 +172,11 @@ class CosmosPolicyTrainer(ImaginaireTrainer):
                     if iteration % self.config.checkpoint.save_iter == 0:
                         self.checkpointer.save(model, optimizer, scheduler, grad_scaler, iteration=iteration)
                     self.callbacks.on_training_step_end(model, data_batch, output_batch, loss, iteration=iteration)
+                    # A bounded HPC workload can stop at an optimizer boundary,
+                    # then use the normal final checkpoint/finalize path below.
+                    if getattr(self, "stop_requested", False):
+                        _end_training = True
+                        break
                     # Validation.
                     if self.config.trainer.run_validation and iteration % self.config.trainer.validation_iter == 0:
                         self.validate(model, dataloader_val, iteration=iteration)

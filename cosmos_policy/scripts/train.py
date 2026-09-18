@@ -34,6 +34,7 @@ from cosmos_policy._src.imaginaire.serialization import to_yaml
 from cosmos_policy._src.imaginaire.utils import distributed
 from cosmos_policy._src.imaginaire.utils.context_managers import data_loader_init, distributed_init, model_init
 from cosmos_policy._src.imaginaire.utils.launch import log_reproducible_setup
+from cosmos_policy.datasets.resumable_sampler import ResumableDistributedSampler, isolated_dataloader_generator
 
 
 @logging.catch(reraise=True)
@@ -61,7 +62,8 @@ def launch(config: Config, args: argparse.Namespace) -> None:
         # since it is difficult to set up the DistributedSampler without creating two duplicates of the dataset.
         # We intentionally instantiate the dataloader on every process (rather than the rank 0 process only) to work with the DistributedSampler.
         dataset = instantiate(config.dataloader_train.dataset)
-        sampler = DistributedSampler(
+        sampler_type = ResumableDistributedSampler if getattr(dataset, "resume_data_order", False) else DistributedSampler
+        sampler = sampler_type(
             dataset=dataset,
             num_replicas=parallel_state.get_data_parallel_world_size(),
             rank=parallel_state.get_data_parallel_rank(),
@@ -78,6 +80,7 @@ def launch(config: Config, args: argparse.Namespace) -> None:
             pin_memory=config.dataloader_train.pin_memory,
             pin_memory_device=config.dataloader_train.pin_memory_device,
             timeout=config.dataloader_train.timeout,
+            generator=isolated_dataloader_generator(dataset, config.trainer.seed),
         )
 
         dataloader_val = None
@@ -101,6 +104,7 @@ def launch(config: Config, args: argparse.Namespace) -> None:
                 pin_memory=config.dataloader_val.pin_memory,
                 pin_memory_device=config.dataloader_val.pin_memory_device,
                 timeout=config.dataloader_val.timeout,
+                generator=isolated_dataloader_generator(dataset_val, config.trainer.seed),
             )
 
     # Start training

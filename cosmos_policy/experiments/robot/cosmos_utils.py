@@ -91,7 +91,10 @@ def get_latent_indices_from_model_config(model):
     state_t = model.config.state_t
     min_conditional_frames = model.config.min_num_conditional_frames
 
-    if state_t == 9 and min_conditional_frames == 4:
+    if state_t == 7 and min_conditional_frames == 3:
+        # Hanoi: [blank, proprio, RGB, action, future_proprio, future_RGB, value]
+        return (1, 2, 4, 5)
+    elif state_t == 9 and min_conditional_frames == 4:
         # LIBERO setup
         return (1, 3, 5, 7)
     elif state_t == 11 and min_conditional_frames == 5:
@@ -384,7 +387,7 @@ def init_t5_text_embeddings_cache(t5_text_embeddings_path: str = None, worker_id
             print(f"Warning: Error loading T5 embeddings cache: {e}. Embeddings will be computed on-demand.")
 
 
-def get_t5_embedding_from_cache(task_label: str) -> torch.Tensor:
+def get_t5_embedding_from_cache(task_label: str, *, allow_compute: bool = True) -> torch.Tensor:
     """
     Get T5 embedding of language instruction from cache.
 
@@ -392,6 +395,7 @@ def get_t5_embedding_from_cache(task_label: str) -> torch.Tensor:
 
     Args:
         task_label (str): Task description string
+        allow_compute (bool): Whether a cache miss may load the large T5 encoder.
 
     Returns:
         torch.Tensor: T5 text embedding
@@ -400,6 +404,11 @@ def get_t5_embedding_from_cache(task_label: str) -> torch.Tensor:
     if task_label in t5_text_embeddings_cache:
         text_embedding = t5_text_embeddings_cache[task_label]
     else:
+        if not allow_compute:
+            raise KeyError(
+                f"No precomputed T5 embedding for {task_label!r}. Prepare the direction-prompt cache "
+                "before Hanoi inference; loading T5 on the policy GPU is disabled."
+            )
         print(f"Computing T5 embedding for new instruction: '{task_label}'...")
         text_embedding = get_text_embedding(task_label)
         t5_text_embeddings_cache[task_label] = text_embedding
@@ -860,7 +869,7 @@ def get_action(
     generate_future_state_and_value_in_parallel: bool = True,
     worker_id: int = 0,
     batch_size: int = 1,
-) -> List[np.ndarray]:
+) -> Dict[str, Any]:
     """
     Generate action predictions with the policy.
 
@@ -887,43 +896,42 @@ def get_action(
     with torch.inference_mode():
         # Get T5 embedding of language instruction
         if isinstance(task_label_or_embedding, str):
-            text_embedding = get_t5_embedding_from_cache(task_label_or_embedding)
+            text_embedding = get_t5_embedding_from_cache(task_label_or_embedding, allow_compute=cfg.suite != "hanoi")
         elif isinstance(task_label_or_embedding, np.ndarray):
             text_embedding = torch.tensor(task_label_or_embedding, dtype=torch.bfloat16).cuda()
+        elif isinstance(task_label_or_embedding, torch.Tensor):
+            text_embedding = task_label_or_embedding
+        else:
+            raise TypeError("Expected a task string or a precomputed text embedding array/tensor")
 
         # Collect all input images
         # Examples:
         #  - LIBERO: 1 wrist image, 1 primary (third-person) image
         #  - RoboCasa: 1 wrist image, 1 primary (third-person) image, 1 secondary (third-person) image
         #  - ALOHA: 2 wrist images, 1 primary (third-person) image
-        IMAGE_IDX, IMAGE2_IDX, WRIST_IMAGE_IDX, WRIST_IMAGE2_IDX = -1, -1, -1, -1
-        if cfg.suite == "libero":
-            all_camera_images = [
-                obs["wrist_image"],
-                obs["primary_image"],
-            ]
-            WRIST_IMAGE_IDX = 0
-            IMAGE_IDX = 1
-        elif cfg.suite == "robocasa":
-            all_camera_images = [
-                obs["wrist_image"],
-                obs["primary_image"],
-                obs["secondary_image"],
-            ]
-            WRIST_IMAGE_IDX = 0
-            IMAGE_IDX = 1
-            IMAGE2_IDX = 2
-        elif cfg.suite == "aloha":
-            all_camera_images = [
-                obs["left_wrist_image"],
-                obs["right_wrist_image"],
-                obs["primary_image"],
-            ]
-            WRIST_IMAGE_IDX = 0
-            WRIST_IMAGE2_IDX = 1
-            IMAGE_IDX = 2
-        else:
+        if cfg.suite not in ("libero", "robocasa", "aloha", "hanoi"):
             raise ValueError(f"Eval suite not implemented yet: {cfg.suite}")
+        all_camera_images = []
+        IMAGE_IDX, IMAGE2_IDX, WRIST_IMAGE_IDX, WRIST_IMAGE2_IDX = -1, -1, -1, -1
+        if cfg.use_wrist_image:
+            wrist_keys = ["left_wrist_image", "right_wrist_image"] if cfg.suite == "aloha" else ["wrist_image"]
+            if cfg.suite == "hanoi" or cfg.num_wrist_images not in range(1, len(wrist_keys) + 1):
+                raise ValueError(f"Unsupported wrist camera configuration for {cfg.suite}")
+            WRIST_IMAGE_IDX = len(all_camera_images)
+            all_camera_images.append(obs[wrist_keys[0]])
+            if cfg.num_wrist_images == 2:
+                WRIST_IMAGE2_IDX = len(all_camera_images)
+                all_camera_images.append(obs[wrist_keys[1]])
+        if cfg.use_third_person_image:
+            if cfg.num_third_person_images not in (1, 2):
+                raise ValueError("Expected one or two third-person cameras")
+            IMAGE_IDX = len(all_camera_images)
+            all_camera_images.append(obs["primary_image"])
+            if cfg.num_third_person_images == 2:
+                IMAGE2_IDX = len(all_camera_images)
+                all_camera_images.append(obs["secondary_image"])
+        if not all_camera_images:
+            raise ValueError("At least one camera image is required")
 
         # Preprocess images
         # Shape: (N, H, W, C)
@@ -939,18 +947,23 @@ def get_action(
         # Build the raw image sequence that will be fed to the model (and the VAE tokenizer)
         image_sequence = []
         current_sequence_idx = 0  # Used to track which index in the sequence of images we are on
+        current_proprio_latent_idx = future_proprio_latent_idx = -1
+        current_wrist_image_latent_idx = current_wrist_image2_latent_idx = -1
+        future_wrist_image_latent_idx = future_wrist_image2_latent_idx = -1
+        current_image_latent_idx = current_image2_latent_idx = -1
+        future_image_latent_idx = future_image2_latent_idx = -1
 
         # Add blank placeholder image (special placeholder for 1+T temporal VAE compression)
         primary_image = all_camera_images[IMAGE_IDX]
         blank_image = np.zeros_like(primary_image)
+        blank_image_duplicated = duplicate_array(
+            blank_image.copy(), total_num_copies=COSMOS_TEMPORAL_COMPRESSION_FACTOR
+        )
         image_sequence.append(np.expand_dims(np.zeros_like(blank_image), axis=0))
         current_sequence_idx += 1
 
         # Add blank placeholder images for robot proprioceptive state (proprio will be injected into latent later)
         if cfg.use_proprio:
-            blank_image_duplicated = duplicate_array(
-                blank_image.copy(), total_num_copies=COSMOS_TEMPORAL_COMPRESSION_FACTOR
-            )
             image_sequence.append(blank_image_duplicated)
             current_proprio_latent_idx = current_sequence_idx
             current_sequence_idx += 1
@@ -1039,7 +1052,7 @@ def get_action(
         if cfg.use_proprio:
             # Convert proprio to tensor so that it can be injected into latent later
             proprio_tensor = (
-                torch.from_numpy(proprio).reshape(batch_size, -1).to(dtype=torch.bfloat16).cuda()
+                torch.from_numpy(proprio).reshape(1, -1).repeat(batch_size, 1).to(dtype=torch.bfloat16).cuda()
             )  # (B, proprio_dim)
         data_batch = {
             "dataset_name": "video_data",
@@ -1126,7 +1139,9 @@ def get_action(
         )
         actions = (
             extract_action_chunk_from_latent_sequence(
-                generated_latent_with_action, action_shape=(cfg.chunk_size, ACTION_DIM), action_indices=action_indices
+                generated_latent_with_action,
+                action_shape=(cfg.chunk_size, getattr(cfg, "action_dim", ACTION_DIM)),
+                action_indices=action_indices,
             )
             .to(torch.float32)
             .cpu()
@@ -1162,6 +1177,8 @@ def get_action(
                     5,
                     6,
                 ]  # 0: blank, 1: curr proprio, 2: curr left wrist img, 3: curr right wrist img, 4: curr primary img, 5: action, 6: future proprio, 7: future left wrist img, 8: future right wrist img, 9: future primary img, 10: value
+            elif cfg.suite == "hanoi":
+                INDICES_TO_REPLACE = [0, 1, 3, 4]
             else:
                 raise ValueError(f"Eval suite not implemented yet: {cfg.suite}")
             future_image_predictions = get_future_images_from_generated_samples(
@@ -1309,6 +1326,8 @@ def get_future_state_prediction(
                 5,
                 6,
             ]  # 0: blank, 1: curr proprio, 2: curr left wrist img, 3: curr right wrist img, 4: curr primary img, 5: action, 6: future proprio, 7: future left wrist img, 8: future right wrist img, 9: future primary img, 10: value
+        elif cfg.suite == "hanoi":
+            INDICES_TO_REPLACE = [0, 1, 3, 4]
         else:
             raise ValueError(f"Eval suite not implemented yet: {cfg.suite}")
 

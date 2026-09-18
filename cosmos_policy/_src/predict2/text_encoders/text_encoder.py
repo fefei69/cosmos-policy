@@ -21,13 +21,13 @@ from torch.distributed.checkpoint.state_dict import StateDictOptions, set_model_
 
 from cosmos_policy._src.imaginaire.flags import SMOKE
 from cosmos_policy._src.imaginaire.lazy_config import LazyCall as L
+from cosmos_policy._src.imaginaire.lazy_config import LazyDict
 from cosmos_policy._src.imaginaire.lazy_config import instantiate as lazy_instantiate
 from cosmos_policy._src.imaginaire.utils import log
 from cosmos_policy._src.imaginaire.utils.embedding_concat_strategy import (
     EmbeddingConcatStrategy as EmbeddingConcatStrategy,
 )
 from cosmos_policy._src.predict2.models.utils import load_state_dict, load_state_dict_from_folder
-from cosmos_policy._src.predict2.text_encoders.reason1 import QwenVLBaseModel
 from cosmos_policy._src.reason1.configs.default.model_config_qwen import QwenModelConfig, QwenVisionConfig
 from cosmos_policy._src.reason1.tokenizer.processor import build_tokenizer
 
@@ -45,7 +45,8 @@ class TextEncoderConfig:
     n_layers_per_group: int = 5
     ckpt_path: str = "s3://bucket/cosmos_reasoning1/sft_exp700/sft_exp721-1_qwen7b_tl_721_5vs5_s3_balanced_n32_resume_16k/checkpoints/iter_000016000/model/"
     s3_credential_path: str = "credentials/s3_checkpoint.secret"
-    model_config: QwenVLBaseModel = L(QwenVLBaseModel)(
+    # Resolve the GPU-only Qwen implementation only when online encoding is selected.
+    model_config: LazyDict = L("cosmos_policy._src.predict2.text_encoders.reason1.QwenVLBaseModel")(
         model_config=L(QwenModelConfig)(
             tokenizer_type="Qwen/Qwen2.5-VL-7B-Instruct",
             name_or_path="Qwen/Qwen2.5-VL-7B-Instruct",

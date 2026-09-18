@@ -22,6 +22,7 @@ training or evaluation. If it is unclear, defaults to using the LIBERO simulatio
 Adapted from: https://github.com/user/openvla-oft/blob/main/experiments/robot/libero/run_libero_eval.py
 """
 
+import os
 import sys
 
 # Define constants for each robot platform
@@ -43,12 +44,31 @@ ALOHA_CONSTANTS = {
     "PROPRIO_DIM": 14,
 }
 
+HANOI_CONSTANTS = {
+    "NUM_ACTIONS_CHUNK": 63,
+    "ACTION_DIM": 4,
+    "PROPRIO_DIM": 4,
+}
+
+HANOI_JOINT_CONSTANTS = {
+    "NUM_ACTIONS_CHUNK": 8,
+    "ACTION_DIM": 4,
+    "PROPRIO_DIM": 7,
+}
+
 
 # Function to detect robot platform from command line arguments
 def detect_robot_platform():
+    explicit = os.environ.get("COSMOS_POLICY_PLATFORM", "").upper()
+    if explicit:
+        if explicit not in {"LIBERO", "ROBOCASA", "ALOHA", "HANOI", "HANOI_JOINT"}:
+            raise ValueError(f"Unknown COSMOS_POLICY_PLATFORM: {explicit}")
+        return explicit
     cmd_args = " ".join(sys.argv).lower()
 
-    if "libero" in cmd_args:
+    if "hanoi" in cmd_args:
+        return "HANOI"
+    elif "libero" in cmd_args:
         return "LIBERO"
     elif "robocasa" in cmd_args:
         return "ROBOCASA"
@@ -69,6 +89,10 @@ elif ROBOT_PLATFORM == "ROBOCASA":
     constants = ROBOCASA_CONSTANTS
 elif ROBOT_PLATFORM == "ALOHA":
     constants = ALOHA_CONSTANTS
+elif ROBOT_PLATFORM == "HANOI":
+    constants = HANOI_CONSTANTS
+elif ROBOT_PLATFORM == "HANOI_JOINT":
+    constants = HANOI_JOINT_CONSTANTS
 
 # Assign constants to global variables
 NUM_ACTIONS_CHUNK = constants["NUM_ACTIONS_CHUNK"]
