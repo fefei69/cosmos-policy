@@ -1,6 +1,8 @@
 # Hanoi Cosmos policy: deployment handover
 
 Written September 17, 2026, for the agent working on the `hardware` branch.
+Updated September 18 after the selected export was loaded and checked on a
+deployment machine (RTX 5080); see sections 2, 3, 6 and 8.
 Everything here describes what the trained policy expects and produces. Nothing
 about robot task success has been measured; the acceptance work in section 6 is
 what establishes that.
@@ -12,7 +14,8 @@ what establishes that.
 | `docs/hanoi_cosmos_waypoint_v4.md` | The run that produced the deployable checkpoint, its selection rule, caveats |
 | `docs/hanoi_cosmos_joint_sparse.md` | The observation/target contract shared by v3 and v4 |
 | `cosmos_policy/experiments/robot/hanoi/waypoint_policy.py` | Loader and serving adapter to call |
-| `cosmos_policy/experiments/robot/hanoi/run_hanoi_physical_eval.py` | Offline evaluation and the serving-parity check to reproduce on the robot machine |
+| `cosmos_policy/experiments/robot/hanoi/run_hanoi_physical_eval.py` | Offline evaluation and serving-parity check (cluster only; section 6 has the deployment-machine variant) |
+| `examples/hanoi/dream_local.py` | Parity and future-frame check on any CUDA GPU, from a single-episode extract |
 | `data/hanoi_cosmos/waypoint_v4/metadata.json` | The full contract under `deployment` (crop, frame, jaw parameters, timing) |
 | OpenPI `docs/hanoi_deployment_handoff.md` | The robot-side executor this policy is meant to plug into |
 
@@ -40,16 +43,51 @@ Minimum copy for a deployment machine:
 
 ```
 <run>/joint_contract.json
-<run>/exports/iter_XXXXXXXXX.pt
+<run>/exports/iter_000008000.pt
 data/hanoi_cosmos/waypoint_v4/{metadata.json,dataset_statistics.json}
 data/hanoi_cosmos/t5_embeddings.pkl
 checkpoints/public/Wan2.1_VAE.pth
 ```
 
+For the acceptance checks in section 6 add `<run>/selected_validation.json` and
+the episode-40 extract `data/hanoi_cosmos/exports_local/hanoi_episode_040.h5`
+(made by `examples/hanoi/extract_episode.py`, 569 MB).
+
+The simplest layout is the repository root of a `hardware` checkout, so every
+default path resolves without overrides. From that root one rsync recreates it;
+`-R` with the `/./` marker keeps the paths relative to the repository:
+
+```bash
+SRC=cw5167@dtn.torch.hpc.nyu.edu:/scratch/cw5167/workspace/cosmos-policy
+RUN=data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_waypoint_v4_20260917
+rsync -avhPR --ignore-missing-args \
+  "$SRC/./$RUN/joint_contract.json" "$SRC/./$RUN/selection.json" \
+  "$SRC/./$RUN/selected_validation.json" "$SRC/./$RUN/exports/iter_000008000.pt" \
+  "$SRC/./data/hanoi_cosmos/waypoint_v4" "$SRC/./data/hanoi_cosmos/t5_embeddings.pkl" \
+  "$SRC/./data/hanoi_cosmos/exports_local/hanoi_episode_040.h5" \
+  "$SRC/./checkpoints/public/Wan2.1_VAE.pth" .
+```
+
+The export's SHA-256 is
+`64208a3da1806524e073052a37f971336fa40d8df466b14ce3a1c089bad20b1f`. If the
+files must live outside the repository, set `HANOI_VAE_PATH` to the VAE and
+pass the other three paths explicitly; the loader still needs
+`joint_contract.json` two directories above the `.pt`.
+
 Runtime: one CUDA GPU with about 10 GB free. Only the evaluation scripts insist
-on H100/H200; the loader does not. Set `COSMOS_POLICY_PLATFORM=hanoi_joint`
-before importing anything from `cosmos_policy`, and source `examples/hanoi/env.sh`
-for the cache and NVRTC settings.
+on H100/H200; the loader does not. Install with
+`uv sync --extra cu128 --python 3.10` and then `examples/hanoi/requirements.txt`
+(h5py 3.16, needed for the recording's Boolean attributes). Three things go
+wrong easily:
+
+- `examples/hanoi/env.sh` exports `COSMOS_POLICY_PLATFORM=hanoi`. Source it
+  first, then `export COSMOS_POLICY_PLATFORM=hanoi_joint`, before any
+  `cosmos_policy` import. The other order fails with a platform-mismatch error.
+- Run Python from the repository root. The inference config's `config_file` is
+  the relative path `cosmos_policy/config/hanoi_waypoint_config.py`.
+- The image must be the contract crop (section 4) in RGB order. Nothing in the
+  loader can detect a BGR frame or a shifted crop; only the replay in section 6
+  does.
 
 ## 3. Loading and calling the policy
 
@@ -75,8 +113,14 @@ result['commit_count']  # 1: execute row 0 only, then re-observe
 ```
 
 Inference is five denoising steps and takes well under a second on an H100.
-With a fixed seed the output is deterministic for a given observation; the
-offline evaluator uses seed 1 and the parity check asserts equality.
+Measured on an RTX 5080 (sm_120, 16 GB): 0.66 s per query after the first
+warm-up call, 7.5 GiB peak allocated, Transformer Engine's fused RoPE kernel
+running without fallback. With a fixed seed the output is deterministic for a
+given observation on a given GPU; the offline evaluator uses seed 1 and the
+parity check asserts equality. Across GPUs the outputs are close but not
+bit-identical (different attention and RoPE kernels): the same six episode-40
+observations scored within 0.06 mm of the H200 evaluation on the 5080, with
+identical jaw intents.
 
 ## 4. Observation contract
 
@@ -107,17 +151,26 @@ documented in both label sets and unmeasured on hardware.
 
 ## 6. Acceptance work before the arm moves
 
-1. **Parity on the deployment GPU.** Run the evaluator there in `actions`
-   mode on a handful of validation examples; it asserts served == offline.
+1. **Parity on the deployment GPU.** `run_hanoi_physical_eval.py` cannot run
+   there: it refuses any GPU but H100/H200, and the dataset class checks the raw
+   recording's path, size and mtime. Use the deployment-machine variant, which
+   takes the same `load_policy` and `get_action` path and needs only the
+   single-episode extract:
    ```
-   python -m cosmos_policy.experiments.robot.hanoi.run_hanoi_physical_eval \
-     --checkpoint <run>/exports/iter_XXXXXXXXX.pt --metadata data/hanoi_cosmos/waypoint_v4 \
-     --mode actions --samples 8 --output /tmp/parity.json
+   source examples/hanoi/env.sh && export COSMOS_POLICY_PLATFORM=hanoi_joint
+   .venv/bin/python examples/hanoi/dream_local.py --samples 6
    ```
+   Compare its per-sample `first_target_xyz_mm` with the same rows in
+   `<run>/selected_validation.json` (episode 40 starts at raw row 288040).
+   Done on the RTX 5080 for `iter_000008000.pt`: six of six within 0.06 mm,
+   jaw intents identical, all six first targets within 5 mm.
 2. **Capture-path replay.** Feed recorded validation observations through the
    robot-side capture, crop and state code, then through `infer`, and compare
-   with the offline predictions for the same rows. Catches BGR/RGB, crop offset,
-   unit and joint-order mistakes before any motion.
+   with offline predictions for the same rows. The evaluators store per-sample
+   errors, not predictions; the reference predictions are the
+   `predicted_targets_abs` entries in `dream_local.py`'s `report.json` (use
+   `--samples 90` for every validation row of the extract). Catches BGR/RGB,
+   crop offset, unit and joint-order mistakes before any motion.
 3. **Static prediction check.** From the robot's actual start pose and a real
    camera frame, print the predicted first destination and jaw intent and check
    by eye that it is the expected first ring pickup.
@@ -152,3 +205,11 @@ frame for held-out examples and saves strips [current | predicted | recorded |
 difference] with L1/PSNR against the recorded frame and the copy-current
 baseline. Batch script: `examples/hanoi/predict_future_images.sbatch`. It is a
 qualitative sanity check of the auxiliary head, not a task metric.
+
+`examples/hanoi/dream_local.py` is the same check for a deployment machine: any
+CUDA GPU, the single-episode extract instead of the raw recording, and it also
+decodes the full 25-frame latent video the model emits (`*_dream.gif`). Only
+frames 5 to 8 (current image) and 17 to 20 (predicted future) carry pictures;
+the other slots hold the injected joint state, waypoints and value and decode
+to black by design. On the 5080, `iter_000008000.pt` predicts the frame about
+21 s ahead at 2.5 mean absolute error versus 19 for copying the current frame.
