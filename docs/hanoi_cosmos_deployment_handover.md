@@ -292,7 +292,10 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   check and commit-one execution (`--server ws://127.0.0.1:8000`). Its
   contract is identical to this policy's deployment contract; inference is
   about 0.1 s against 0.48 s here. Replay from the v4 start predicts the
-  hover over A within 1.3 mm.
+  hover over A within 1.3 mm. Its first live run made 11 of 15 moves with
+  three null moves (ring put back where it was taken); those come from a
+  state shortcut on the recording's grasp/release column offset, shown by
+  swapping joint states between observations. Details in the OpenPI README.
 - This is the policy's real-world precision as it stands: about 1 mm offline,
   3 to 4 mm live, against a grasp tolerance of about 3 mm. The client executes
   the raw output by default. The server publishes the 18 recorded destinations
