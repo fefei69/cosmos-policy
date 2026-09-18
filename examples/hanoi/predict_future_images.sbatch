@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 #SBATCH --job-name=cosmos-hanoi-future-frames
 #SBATCH --account=torch_pr_595_tandon_advanced
-#SBATCH --partition=h200_tandon,h200_public
+#SBATCH --partition=h200_tandon,h200_public,a100_tandon
 #SBATCH --nodes=1
 #SBATCH --ntasks=1
 #SBATCH --gres=gpu:1
