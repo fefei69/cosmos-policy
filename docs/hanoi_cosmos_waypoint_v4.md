@@ -1,7 +1,7 @@
 # Cosmos Hanoi training on waypoint_v4 labels
 
 Run `hanoi_cosmos_waypoint_v4_20260917`, Slurm job 17929493, submitted
-September 17, 2026, 18:25 EDT. The joint_v3 run (`hanoi_cosmos_joint_sparse_20260917`,
+September 17, 2026, 18:25 EDT, completed September 18, 01:08 EDT. The joint_v3 run (`hanoi_cosmos_joint_sparse_20260917`,
 job 17904589) was cancelled at step 17,710 on September 17, 19:21 EDT, to free
 its GPU slot; its exports through step 16,000 are kept and none of its modules
 were edited.
