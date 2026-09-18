@@ -18,6 +18,8 @@ Protocol (identical framing to OpenPI's ``WebsocketPolicyServer``):
    measured XYZ, and an optional ``prompt`` that must equal the trained instruction.
 3. Each reply is ``{"actions": (8, 4) float32 absolute XYZ + jaw intent, "commit_count": 1,
    "server_timing": {...}}``. A text reply is a traceback; the connection then closes.
+   With ``--dream`` each reply also carries ``future_image`` (224, 224, 3) uint8, the frame the
+   model expects after the whole chunk, and ``value`` in [0, 1]; the actions are unchanged.
 
 The server calls ``HanoiWaypointPolicy.infer`` with a fixed seed, the exact adapter the
 offline serving-parity check validates, and nothing else.
@@ -106,7 +108,16 @@ def validate_reply(result: dict) -> dict:
         raise ValueError("Policy must return eight finite XYZ/jaw destinations")
     if int(result.get("commit_count", 1)) != 1:
         raise ValueError("The waypoint policy commits exactly one destination per observation")
-    return {"actions": actions, "commit_count": 1}
+    reply = {"actions": actions, "commit_count": 1}
+    if "future_image" in result:
+        future = np.asarray(result["future_image"])
+        if future.shape != (224, 224, 3) or future.dtype != np.uint8:
+            raise ValueError("Predicted future frame must be a 224 x 224 x 3 uint8 image")
+        value = float(result.get("value", np.nan))
+        if not np.isfinite(value) or not 0 <= value <= 1:
+            raise ValueError("Predicted value must lie in [0, 1]")
+        reply["future_image"], reply["value"] = future, value
+    return reply
 
 
 # ---- server ----
@@ -121,8 +132,10 @@ def _health_check(connection, request):
 class WaypointPolicyServer:
     """One policy, any number of sequential clients; inference runs on the event-loop thread."""
 
-    def __init__(self, policy, metadata: dict, *, host: str = "127.0.0.1", port: int = 8001, seed: int = 1):
+    def __init__(self, policy, metadata: dict, *, host: str = "127.0.0.1", port: int = 8001, seed: int = 1,
+                 dream: bool = False):
         self.policy = policy
+        self.dream = dream
         self.metadata = metadata
         self.host, self.port, self.seed = host, port, seed
         self.bound_port = None
@@ -176,7 +189,7 @@ class WaypointPolicyServer:
             try:
                 observation = validate_observation(unpackb(message))
                 infer_started = time.monotonic()
-                reply = validate_reply(self.policy.infer(observation, seed=self.seed))
+                reply = validate_reply(self.policy.infer(observation, seed=self.seed, **({"dream": True} if self.dream else {})))
                 reply["server_timing"] = {"infer_ms": (time.monotonic() - infer_started) * 1000}
                 if previous_total is not None:
                     reply["server_timing"]["prev_total_ms"] = previous_total * 1000
@@ -216,7 +229,8 @@ def destination_grid(metadata_dir: Path) -> list:
     return points.tolist()
 
 
-def build_metadata(checkpoint: Path, metadata_dir: Path, *, seed: int, denoising_steps: int, gpu: str) -> dict:
+def build_metadata(checkpoint: Path, metadata_dir: Path, *, seed: int, denoising_steps: int, gpu: str,
+                   dream: bool = False) -> dict:
     """Identity the client verifies before moving: contract, hashes, sampling settings, destination grid."""
     prepared = json.loads((metadata_dir / "metadata.json").read_text())
     run = checkpoint.resolve().parent.parent
@@ -236,6 +250,7 @@ def build_metadata(checkpoint: Path, metadata_dir: Path, *, seed: int, denoising
             "seed": seed,
             "num_denoising_steps": denoising_steps,
             "commit_count": 1,
+            "dream": dream,
             "gpu": gpu,
         }
     }
@@ -260,7 +275,7 @@ def load_policy(checkpoint: Path, metadata_dir: Path, embeddings: Path, *, denoi
     return HanoiWaypointPolicy(cfg), torch.cuda.get_device_name()
 
 
-def warm_up(policy, seed: int) -> float:
+def warm_up(policy, seed: int, *, dream: bool = False) -> float:
     """One discarded inference so the first robot request does not pay CUDA warm-up."""
     observation = {
         "observation/image": np.zeros((224, 224, 3), np.uint8),
@@ -269,7 +284,7 @@ def warm_up(policy, seed: int) -> float:
         "prompt": PROMPT,
     }
     started = time.monotonic()
-    validate_reply(policy.infer(observation, seed=seed))
+    validate_reply(policy.infer(observation, seed=seed, **({"dream": True} if dream else {})))
     return time.monotonic() - started
 
 
@@ -282,17 +297,22 @@ def main() -> None:
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--seed", type=int, default=1)
     parser.add_argument("--denoising-steps", type=int, default=5)
+    parser.add_argument("--dream", action="store_true",
+                        help="return the predicted future frame and value with every reply so the client "
+                             "can save them (one extra VAE decode per request; actions unchanged)")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
     policy, gpu = load_policy(args.checkpoint, args.metadata, args.embeddings, denoising_steps=args.denoising_steps)
     logging.info("Policy loaded on %s; hashing export for the identity handshake", gpu)
     metadata = build_metadata(
-        args.checkpoint, args.metadata, seed=args.seed, denoising_steps=args.denoising_steps, gpu=gpu
+        args.checkpoint, args.metadata, seed=args.seed, denoising_steps=args.denoising_steps, gpu=gpu,
+        dream=args.dream,
     )
     logging.info("Export SHA-256 %s", metadata["cosmos_hanoi"]["export_sha256"])
-    logging.info("Warm-up inference took %.2f s", warm_up(policy, args.seed))
-    WaypointPolicyServer(policy, metadata, host=args.host, port=args.port, seed=args.seed).serve_forever()
+    logging.info("Warm-up inference took %.2f s", warm_up(policy, args.seed, dream=args.dream))
+    WaypointPolicyServer(policy, metadata, host=args.host, port=args.port, seed=args.seed,
+                         dream=args.dream).serve_forever()
 
 
 if __name__ == "__main__":

@@ -281,6 +281,14 @@ Not known: a full episode on hardware; how much height drift remains once
 the chain starts from the recorded start pose; behaviour if the board state is not one
 seen in the 50 recorded episodes; recovery after a failed grasp.
 
+Dreams from deployment runs: the server returns only the destinations unless
+started with `--dream`, which adds the predicted future frame and value to
+every reply (one VAE decode; actions unchanged) so the client saves them under
+`inference_dreams/`. For a run recorded without it,
+`examples/hanoi/dream_run.py --run-dir <openpi run dir>` re-runs the policy on
+the saved `inference_inputs/` and writes strips, a contact sheet and a report
+under `<run dir>/dreams/`; offline and live decisions agree to about 0.2 mm.
+
 ## 8. World-model head check
 
 `examples/hanoi/predict_future_images.py` decodes the model's predicted future

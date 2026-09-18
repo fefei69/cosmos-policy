@@ -32,11 +32,15 @@ class FakePolicy:
     def __init__(self):
         self.calls = []
 
-    def infer(self, obs, *, seed):
+    def infer(self, obs, *, seed, dream=False):
         self.calls.append((obs, seed))
         actions = np.tile(np.r_[obs["observation/cartesian_position"], 1.0], (8, 1)).astype(np.float32)
         actions[:, 0] += np.arange(8, dtype=np.float32) * 0.001
-        return {"actions": actions, "commit_count": 1, "reference_rate_hz": None}
+        reply = {"actions": actions, "commit_count": 1, "reference_rate_hz": None}
+        if dream:
+            reply["future_image"] = np.full((224, 224, 3), 9, np.uint8)
+            reply["value"] = 0.5
+        return reply
 
 
 def test_codec_roundtrips_arrays_scalars_and_nested_dicts():
@@ -84,6 +88,13 @@ def test_reply_validation():
         validate_reply({"actions": np.zeros((63, 4))})
     with pytest.raises(ValueError, match="exactly one destination"):
         validate_reply({"actions": np.zeros((8, 4)), "commit_count": 2})
+    assert "future_image" not in good
+    dreamed = validate_reply({"actions": np.zeros((8, 4)), "future_image": np.zeros((224, 224, 3), np.uint8), "value": 0.25})
+    assert dreamed["future_image"].shape == (224, 224, 3) and dreamed["value"] == 0.25
+    with pytest.raises(ValueError, match="uint8 image"):
+        validate_reply({"actions": np.zeros((8, 4)), "future_image": np.zeros((224, 224, 3), np.float32), "value": 0.5})
+    with pytest.raises(ValueError, match="value must lie"):
+        validate_reply({"actions": np.zeros((8, 4)), "future_image": np.zeros((224, 224, 3), np.uint8), "value": 1.5})
 
 
 def test_metadata_carries_contract_and_hashes(tmp_path):
@@ -109,6 +120,8 @@ def test_metadata_carries_contract_and_hashes(tmp_path):
     assert identity["export_sha256"] == __import__("hashlib").sha256(b"weights").hexdigest()
     assert identity["statistics_sha256"] == __import__("hashlib").sha256(b"{}").hexdigest()
     assert identity["training_identity"]["max_updates"] == 8000 and identity["commit_count"] == 1
+    assert identity["dream"] is False
+    assert build_metadata(export, metadata_dir, seed=1, denoising_steps=5, gpu="test", dream=True)["cosmos_hanoi"]["dream"] is True
 
 
 @pytest.fixture
@@ -133,6 +146,7 @@ def test_wire_protocol_roundtrip_and_error_close(server):
         reply = unpackb(ws.recv(timeout=5))
         assert reply["actions"].shape == (8, 4) and reply["actions"].dtype == np.float32
         assert reply["commit_count"] == 1 and reply["server_timing"]["infer_ms"] >= 0
+        assert "future_image" not in reply and "value" not in reply
         np.testing.assert_allclose(reply["actions"][0, :3], [0.49, -0.05, 0.19])
         ws.send(packb(observation()))
         second = unpackb(ws.recv(timeout=5))
@@ -147,3 +161,21 @@ def test_wire_protocol_roundtrip_and_error_close(server):
     # The server stays up for the next client.
     with connect(uri, compression=None, open_timeout=5) as ws:
         assert unpackb(ws.recv(timeout=5))["cosmos_hanoi"]["contract"]["version"] == 4
+
+
+def test_dreaming_server_returns_the_future_frame_and_value():
+    instance = WaypointPolicyServer(FakePolicy(), {"cosmos_hanoi": {"dream": True}}, port=0, seed=3, dream=True)
+    thread = threading.Thread(target=instance.serve_forever, daemon=True)
+    thread.start()
+    assert instance.ready.wait(5)
+    try:
+        with connect(f"ws://127.0.0.1:{instance.bound_port}", compression=None, open_timeout=5) as ws:
+            assert unpackb(ws.recv(timeout=5))["cosmos_hanoi"]["dream"] is True
+            ws.send(packb(observation()))
+            reply = unpackb(ws.recv(timeout=5))
+            assert reply["actions"].shape == (8, 4) and reply["value"] == 0.5
+            assert reply["future_image"].shape == (224, 224, 3) and reply["future_image"].dtype == np.uint8
+            assert int(reply["future_image"][0, 0, 0]) == 9
+    finally:
+        instance.stop()
+        thread.join(5)

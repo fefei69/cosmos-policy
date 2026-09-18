@@ -106,8 +106,13 @@ def load_joint_policy(cfg):
     return model, stats, config
 
 
-def predict_joint_actions(cfg, model, stats, image, state, cartesian_position, *, seed=1):
-    """Return all eight absolute targets; the executor commits ONLY row zero."""
+def predict_joint_actions(cfg, model, stats, image, state, cartesian_position, *, seed=1, return_future=False):
+    """Return all eight absolute targets; the executor commits ONLY row zero.
+
+    With ``return_future`` the model's predicted future frame (224 x 224 x 3 uint8) and its
+    value estimate in [0, 1] come back as well. Both are decoded from the same generated
+    latent, so the actions are unchanged; the cost is one VAE decode.
+    """
     from cosmos_policy.experiments.robot.cosmos_utils import get_action
     validate_joint_config(cfg)
     xyz = np.asarray(cartesian_position, np.float32)
@@ -116,8 +121,12 @@ def predict_joint_actions(cfg, model, stats, image, state, cartesian_position, *
     observation = make_joint_observation(image, state)
     prediction = get_action(cfg, model, stats, observation, PROMPT, seed=seed, randomize_seed=False,
                             num_denoising_steps_action=cfg.num_denoising_steps_action,
-                            generate_future_state_and_value_in_parallel=False, batch_size=1)
-    return absolute_joint_actions(prediction['actions'], xyz)
+                            generate_future_state_and_value_in_parallel=return_future, batch_size=1)
+    actions = absolute_joint_actions(prediction['actions'], xyz)
+    if not return_future:
+        return actions
+    future = np.asarray(prediction['future_image_predictions']['future_image'], dtype=np.uint8)
+    return actions, future, float(prediction['value_prediction'])
 
 
 class HanoiJointPolicy:
@@ -126,9 +135,13 @@ class HanoiJointPolicy:
         self.cfg = cfg
         self.model, self.stats, _ = load_joint_policy(cfg)
 
-    def infer(self, observation, *, seed=1):
+    def infer(self, observation, *, seed=1, dream=False):
         if observation.get('prompt', PROMPT) != PROMPT:
             raise ValueError('This policy was trained for AAAA to CCCC only')
-        actions = predict_joint_actions(self.cfg, self.model, self.stats, observation['observation/image'],
-                                        observation['observation/state'], observation['observation/cartesian_position'], seed=seed)
-        return {'actions': actions, 'commit_count': 1, 'reference_rate_hz': None}
+        result = predict_joint_actions(self.cfg, self.model, self.stats, observation['observation/image'],
+                                       observation['observation/state'], observation['observation/cartesian_position'],
+                                       seed=seed, return_future=dream)
+        if not dream:
+            return {'actions': result, 'commit_count': 1, 'reference_rate_hz': None}
+        actions, future, value = result
+        return {'actions': actions, 'commit_count': 1, 'reference_rate_hz': None, 'future_image': future, 'value': value}
