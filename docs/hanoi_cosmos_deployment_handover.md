@@ -250,12 +250,19 @@ OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
   3.6 mm off in every run for the same reason: the shared rod-A start pose
   comes from the September 10 recording, and "descend straight down"
   inherits that offset.
-- Fix in the client, not the model: the server now publishes the 18 recorded
-  destinations and the client snaps each committed destination onto that grid
-  (hovers by height only, releases to the nearest point, grasps to the nearest
-  peg column then the nearest ring level), and stops if a grasp height is
-  ambiguous between levels. The model's job reduces to choosing the point,
-  which it did correctly in all four runs.
+- This is the policy's real-world precision as it stands: about 1 mm offline,
+  3 to 4 mm live, against a grasp tolerance of about 3 mm. The client executes
+  the raw output by default. The server publishes the 18 recorded destinations
+  and the client can snap onto them (`--snap-to-recorded-destinations`), but
+  only as an ablation that separates "wrong point" from "imprecise point"; it
+  replaces the model's output with task knowledge and must be off when the
+  policy is being measured.
+- The model-side fix is a short fine-tune on the deployment observations
+  themselves: every live request's image and state are saved, the correct
+  destination for each is the recorded grid point, and the v4 importer accepts
+  a new audit file. That teaches the model to predict absolute destinations
+  from a slightly displaced stopped arm instead of replaying the recorded
+  displacement.
 
 Not known: a full episode on hardware; behaviour if the board state is not one
 seen in the 50 recorded episodes; recovery after a failed grasp.
