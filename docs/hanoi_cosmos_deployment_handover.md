@@ -204,7 +204,11 @@ documented in both label sets and unmeasured on hardware.
    `./run_cosmos_client.sh --duration-s 90` for one ring transfer, then a longer
    run for one full episode. Moves are rest-to-rest at half speed; a jaw change
    waits for arrival; stroke at or below 8 mm during a closed grip stops the run
-   and returns home; Ctrl-C holds and opens. Record placement error at every stop.
+   and returns home; Ctrl-C holds and opens; when the duration ends the client
+   finishes any placement in progress, opens, and returns to joint home. In-flight
+   tracking tolerance is 8 mm (a loaded 105 mm lift lagged 3 mm within 0.6 s on
+   the first live run), arrival 3 mm after a 0.5 s settle. Record placement
+   error at every stop.
 5. Only then compare against tolerance and decide whether the stopped-observation
    shift needs a short on-robot fine-tune (the v4 importer accepts a new audit
    file without code changes).
@@ -223,9 +227,24 @@ Jaw intent is 100% correct on both splits, first target and all eight slots.
 Serving parity passed on both. Per-export numbers for all eight exports are in
 `<run>/evaluation/`; see `docs/hanoi_cosmos_waypoint_v4.md`.
 
-Not known: anything on hardware; behaviour when the arm is stopped at
-observation time; behaviour if the board state is not one seen in the 50
-recorded episodes; recovery after a failed grasp.
+Hardware, September 18, 2026, two live runs of `iter_000008000.pt` through the
+OpenPI `cosmos_client.py` on the real arm from the rod-A pose:
+
+- Run 1 descended to the recorded grasp point, closed to a 14 mm grip on the
+  ring (the pi0.5 runs never exceeded 9 mm), and was stopped by a 3 mm tracking
+  watchdog 0.6 s into the loaded lift. The limit was inherited from pi0.5 and is
+  now 8 mm in flight, 3 mm on arrival.
+- Run 2 completed the first ring transfer, peg A to peg B, in one attempt:
+  grip, lift (worst lag 2.6 mm), carry, descend, release, every arrival within
+  0.5 mm. It was then stopped by the pi0.5-derived workspace ceiling, which the
+  lift-away exceeded by 0.07 mm. The client now uses bounds derived from this
+  policy's labels.
+- Live destinations sit 2 to 4 mm outside the recorded label range (hover 2 to
+  3 mm high, carry x 3.6 mm low). This is the stopped-observation shift, and it
+  did not prevent the transfer.
+
+Not known: a full episode on hardware; behaviour if the board state is not one
+seen in the 50 recorded episodes; recovery after a failed grasp.
 
 ## 8. World-model head check
 
