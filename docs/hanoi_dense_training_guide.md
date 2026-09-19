@@ -32,16 +32,25 @@ No curated windows, no DAgger, no perturbation collection, no synthetic data.
 | 2 | Chunk length | pi0.5: 30 steps (3.0 s). Cosmos: 16 steps (1.6 s) | Cosmos 32 steps |
 | 3 | Action space | absolute base-frame XYZ of the commanded reference pose, plus jaw intent 0/1 | relative to measured XYZ (the v3/v4 encoding) |
 | 4 | State | six joint angles plus measured jaw stroke, no velocity | add Cartesian XYZ |
-| 5 | pi0.5 discrete state input | off (`discrete_state_input=False`) | on, as in v4 |
+| 5 | pi0.5 state input | continuous (`discrete_state_input=False`) | discretised into tokens, as in v4 |
 | 6 | Direction | AAAA to CCCC only | both directions as a multitask run |
-| 7 | Cosmos initial weights | run A from `Cosmos-Policy-LIBERO-Predict2-2B.pt` (as v4); run B from the Cosmos-Predict2 2B video base | one run only, LIBERO init |
+| 7 | Cosmos initial weights | the Cosmos-Predict2 2B video base (run B); the LIBERO policy checkpoint used by v4 only as a comparison run A if a second GPU is free | LIBERO init only |
 | 8 | Budget | pi0.5 30,000 updates at batch 32 (about 2.8 epochs). Cosmos 16,000 updates at effective batch 32 (about 1.5 epochs) | shorter Cosmos budget as in v4 (8,000) |
 | 9 | Episode split | the waypoint_v4 episode split, unchanged, so results are comparable | 45 train / 5 validation, no test |
 | 10 | Image augmentation | none | mild colour jitter |
 | 11 | Selection rule | lowest mean per-step XYZ error on validation with jaw accuracy at least 0.99; ties by earlier step | validation flow loss |
 | 12 | Execution prefix at deployment | pi0.5 3 steps (0.3 s), Cosmos 8 steps (0.8 s) | longer prefixes |
 
-Decision 7 is the only one that doubles compute; if the budget allows one Cosmos run only, run A.
+Decision 7: the user wants the video base. The action, proprio and value slots then start untrained and
+must be learned from 50 episodes (about 3.3 hours of video, 340k observations), which the LIBERO
+checkpoint had already learned on other data. Watch for that: if the video-init run's validation slot-1
+error is not below 5 mm by 6,000 updates, launch run A (LIBERO init) as well and report both. Run A on a
+second GPU from the start if one is available.
+
+Decision 5 explained: pi0.5 can feed the proprioceptive state either as a continuous vector into the
+action expert, or discretised into bins and given to the language model as tokens. v4 used the tokens.
+Tokens make the policy's output a step function of the state, which is how the phase shortcut arose: the
+decision flipped within 0.2 mm of hover position. Continuous is the default here.
 
 ## 3. Source data
 
@@ -142,10 +151,12 @@ skips elapsed references during the longer dwell.
   input. The value label keeps the v4 definition (discounted steps to episode end).
 - Config `hanoi_dense_config.py` after `hanoi_waypoint_config.py`: effective batch 32 (micro 16), the v4
   schedule shape, `max_iter` 16,000, save every 1,000, one H100 or H200 (decision 8).
-- Initial weights: run A `checkpoints/public/Cosmos-Policy-LIBERO-Predict2-2B.pt` as in v4; run B the
-  Cosmos-Predict2 2B base the LIBERO policy was itself fine-tuned from (decision 7). Record the SHA-256
-  of the initial weights in `joint_contract.json` as v4 does. Use separate run names
-  `hanoi_cosmos_dense_<date>_libero_init` and `hanoi_cosmos_dense_<date>_video_init`.
+- Initial weights: run B, the primary, from the Cosmos-Predict2 2B video base that the LIBERO policy was
+  itself fine-tuned from (decision 7); the newly added slots (actions, proprio, future proprio, value)
+  are initialised the way the Cosmos Policy release initialises them from that base. Run A, the
+  comparison, from `checkpoints/public/Cosmos-Policy-LIBERO-Predict2-2B.pt` as in v4. Record the
+  SHA-256 of the initial weights in `joint_contract.json` as v4 does. Run names
+  `hanoi_cosmos_dense_<date>_video_init` and `hanoi_cosmos_dense_<date>_libero_init`.
 - Export every saved iteration with the existing exporter; `joint_contract.json` gets contract
   `hanoi_dense_v5_cosmos_v1`, the statistics hash, the raw hash, batch, updates and the selection rule.
 - Serving: the waypoint server module is the template; the reply becomes
