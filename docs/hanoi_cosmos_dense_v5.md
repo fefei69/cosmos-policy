@@ -2,7 +2,9 @@
 
 Prepared September 19, 2026, from `docs/hanoi_dense_training_guide.md`. This
 note covers only the Cosmos pipeline; the pi0.5 pipeline is the OpenPI
-agent's. Nothing has been launched: see the gates below.
+agent's. Run B (video init) was submitted as job 18019908 with continuation
+18019909 on September 19, 11:22 EDT; run A (LIBERO init) is not queued while
+the per-user GPU cap is filled by the OpenPI dense run and run B.
 
 ## Section 3 audit of the raw recording (50 episodes, 360,050 rows)
 
@@ -65,9 +67,13 @@ than training. Selection is decision 11.
    free), enough for both Cosmos runs. One Cosmos dense run needs about
    115 GB (16 exports at 3.9 GB plus two resumable checkpoints at 26 GB). The
    launcher re-checks the quota before every stage.
-2. **Video base checkpoint.** `checkpoints/public/model-480p-16fps.pt` from
-   the gated `nvidia/Cosmos-Predict2-2B-Video2World` is not on the cluster and
-   there is no Hugging Face token. Run B cannot start without it.
+2. **Video base checkpoint.** Fetched September 19, 11:17 EDT with
+   `examples/hanoi/fetch_video_base.sh`: 3,913,017,214 bytes, SHA-256
+   `fbc4f05d948078539cb5d7a8e59b6f40f940e4836b5b8a31dcab03e3e807a6f0`,
+   715 `net.*` tensors with the same keys and shapes as the LIBERO policy
+   network. A first attempt through the Python downloader was killed by the
+   4 GB interactive memory cap and left a hollow sparse prefix; resuming onto
+   it produced a corrupt file, which was discarded.
 3. **Per-user GPU cap.** Two concurrent GPU jobs per user were observed on
    September 17. With the OpenPI dense run and one Cosmos run, the second
    Cosmos run waits.
