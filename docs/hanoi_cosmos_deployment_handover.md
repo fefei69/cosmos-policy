@@ -334,6 +334,14 @@ full puzzle on the arm, 15 legal moves in 270 s from the hover over peg A, raw
 output, no interventions (OpenPI `dense_live_1789936407839752778`). A Cosmos
 dense checkpoint on the same recording is the direct comparison.
 
+Cosmos dense contract five (September 20): the cycle-2 video-init export
+(`hanoi_cosmos_dense_20260919_video_init_cycle2/exports/iter_000016000.pt`) is
+served by `cosmos_policy/experiments/robot/hanoi/serve_dense.py` over the
+OpenPI WebSocket protocol on port 8001 and driven by the OpenPI dense client
+(`./run_dense_client.sh --server ws://127.0.0.1:8001 --mode live`). The
+cluster agent's HTTP server (`serve_hanoi_dense.py`) is not used on the arm.
+Replay: slot-1 0.69 mm, 0.5 s inference, no brakes. Not yet run live.
+
 ## 8. World-model head check
 
 `examples/hanoi/predict_future_images.py` decodes the model's predicted future
