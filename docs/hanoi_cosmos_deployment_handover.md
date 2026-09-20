@@ -322,6 +322,13 @@ every reply (one VAE decode; actions unchanged) so the client saves them under
 the saved `inference_inputs/` and writes strips, a contact sheet and a report
 under `<run dir>/dreams/`; offline and live decisions agree to about 0.2 mm.
 
+Dense contract five: the OpenPI client `examples/hanoi/deployment/dense_client.py`
+executes 10 Hz reference chunks in velocity-continuous 0.3 s segments
+(see the OpenPI README, "Dense contract-five client"). A Cosmos dense
+checkpoint served with the same reply shape (`actions` (16, 4), `reference_rate_hz`
+10, `execution_prefix` 8, identity under `hanoi_dense`) can use it after the
+client's horizon and prefix are read from the contract instead of fixed.
+
 ## 8. World-model head check
 
 `examples/hanoi/predict_future_images.py` decodes the model's predicted future
