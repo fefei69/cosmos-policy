@@ -329,6 +329,11 @@ checkpoint served with the same reply shape (`actions` (16, 4), `reference_rate_
 10, `execution_prefix` 8, identity under `hanoi_dense`) can use it after the
 client's horizon and prefix are read from the contract instead of fixed.
 
+Result to beat (September 20): the pi0.5 dense contract-five policy solved the
+full puzzle on the arm, 15 legal moves in 270 s from the hover over peg A, raw
+output, no interventions (OpenPI `dense_live_1789936407839752778`). A Cosmos
+dense checkpoint on the same recording is the direct comparison.
+
 ## 8. World-model head check
 
 `examples/hanoi/predict_future_images.py` decodes the model's predicted future
