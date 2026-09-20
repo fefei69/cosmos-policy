@@ -67,9 +67,9 @@ def summarize(samples, tolerance_mm=2.0):
     per_slot_jaw = [float(jaw[valid[:, j], j].mean()) if valid[:, j].any() else None for j in range(HORIZON)]
     slot1 = errors[:, 0]
     endpoint = np.array([s['endpoint_mm'] for s in samples])
-    truth, guess = targets[valid].astype(bool), (targets[valid].astype(bool) == jaw[valid])
-    tp, tn = int((truth & guess).sum()), int((~truth & guess).sum())
-    fp, fn = int((~truth & ~guess).sum()), int((truth & ~guess).sum())
+    truth, correct = targets[valid].astype(bool), jaw[valid].astype(bool)  # jaw holds per-slot correctness
+    tp, tn = int((truth & correct).sum()), int((~truth & correct).sum())
+    fp, fn = int((~truth & ~correct).sum()), int((truth & ~correct).sum())
     balanced = ((tp / (tp + fn) if tp + fn else 0.0) + (tn / (tn + fp) if tn + fp else 0.0)) / 2
     flips = [s for s in samples if s['true_flip_slot'] >= 0]
     timed = [s for s in flips if s['predicted_flip_slot'] >= 0]

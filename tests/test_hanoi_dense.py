@@ -217,3 +217,5 @@ def test_selection_rule_and_metrics():
     s = summarize([m])
     assert s['jaw']['flip_timing_rows_median'] == FRAMESKIP and s['xyz_mm']['slot1_mean'] == pytest.approx(2.0)
     assert s['xyz_mm']['endpoint_mean'] == 0 and s['value_abs_error']['mean'] == pytest.approx(0.1) and 'future_l1' not in s
+    # Balanced accuracy: 14 valid slots, 8 closed (all correct) and 6 open (slot 9 predicted closed): (8/8 + 5/6) / 2.
+    assert s['jaw']['accuracy_valid_slots'] == pytest.approx(13 / 14) and s['jaw']['balanced_accuracy_valid_slots'] == pytest.approx((1.0 + 5 / 6) / 2)
