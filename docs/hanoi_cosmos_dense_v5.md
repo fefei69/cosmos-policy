@@ -141,7 +141,23 @@ All met on validation. The balanced-accuracy field in
 recorded in `code_updates.json`); with 99.95% accuracy over a roughly 50/50
 open/closed split, balanced accuracy is at least 0.999.
 
-Test split: see below (filled in when the locked test pass completes).
+Test split (locked after selection; every third row, 11,601 scored, 5 all-padded rows skipped), same export:
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Flips predicted | Flip timing |
+|---|---|---|---|---|---|---|---|---|
+| All | 11,601 | 1.15 / 0.94 / 2.77 mm | 88.8% | 3.25 mm | 4.73 mm | 0.9994 | 2,315 of 2,321 | median 0, p95 0 rows |
+| Stationary | 1,957 | 1.15 / 1.01 / 2.61 mm | 91.7% | 6.69 mm | 11.24 mm | 0.9998 | 25 of 25 | median 0, p95 3 rows |
+| Moving | 9,644 | 1.15 / 0.93 / 2.78 mm | 88.2% | 2.55 mm | 3.41 mm | 0.9994 | 2,290 of 2,296 | median 0, p95 0 rows |
+
+Future frame PSNR 31.7 dB, value error 0.003. No validation-to-test gap. The
+pipeline recorded completion on September 20, 02:17 EDT (job 18053668).
+Nothing here is a hardware result; live success is measured on the arm.
+
+A second training cycle (`hanoi_cosmos_dense_20260919_video_init_cycle2`,
+jobs 18059379 + 18059380) was started on September 20 at the user's request,
+from this export with a fresh optimizer and the same schedule shape, 16,000
+more updates. Its exports are candidates only if they beat 3.25 mm mean over
+slots with jaw accuracy above 0.99 on the same validation rows.
 
 ### Where the later-slot error comes from
 
