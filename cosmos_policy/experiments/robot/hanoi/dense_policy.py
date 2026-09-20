@@ -1,7 +1,11 @@
-"""Inference for hanoi_dense_v5 checkpoints: a 16 x 4 chunk of absolute reference poses at 10 Hz.
+"""Inference for hanoi_dense_v5 checkpoints: an H x 4 chunk of absolute reference poses at 10 Hz.
 
-The reply contract (guide section 6) is ``{"actions": (16, 4) float32 absolute,
-"reference_rate_hz": 10, "execution_prefix": 8}`` with jaw intent thresholded
+H is 16 (decision 2) or 32 for the chunk-length comparison run; it is the
+``chunk_size`` of the inference config, must equal the platform constant
+(``HANOI_DENSE_HORIZON``) and the ``horizon`` recorded in the checkpoint's
+identity. The reply contract (guide section 6) is ``{"actions": (H, 4) float32
+absolute, "reference_rate_hz": 10, "execution_prefix": 8, "action_horizon": H}``
+with jaw intent thresholded
 at 0.5, plus an identity block under ``cosmos_hanoi`` carrying the deployment
 contract and the hashes of the export and the normalisation statistics.
 """
@@ -12,7 +16,9 @@ import pickle
 
 import numpy as np
 
-from cosmos_policy.datasets.hanoi_dense_data import CONTRACT, DEPLOYMENT_CONTRACT, EXECUTION_PREFIX, HORIZON, REFERENCE_RATE_HZ
+from cosmos_policy.datasets.hanoi_dense_data import (
+    CONTRACT, EXECUTION_PREFIX, HORIZON, HORIZONS, REFERENCE_RATE_HZ, deployment_contract,
+)
 from cosmos_policy.datasets.hanoi_joint_data import PROMPT, sha256
 from cosmos_policy.experiments.robot.hanoi.joint_policy import make_joint_observation
 from cosmos_policy.experiments.robot.hanoi.policy import HanoiInferenceConfig, load_hanoi_weights
@@ -29,15 +35,18 @@ def validate_dense_config(cfg):
     expected = {'suite': 'hanoi', 'use_third_person_image': True, 'num_third_person_images': 1,
                 'use_wrist_image': False, 'num_wrist_images': 0, 'use_proprio': True,
                 'normalize_proprio': True, 'unnormalize_actions': True, 'action_dim': 4,
-                'chunk_size': HORIZON, 'use_jpeg_compression': False, 'trained_with_image_aug': False}
+                'use_jpeg_compression': False, 'trained_with_image_aug': False}
     for key, value in expected.items():
         if getattr(cfg, key) != value:
             raise ValueError(f'Dense policy requires {key}={value!r}')
+    if cfg.chunk_size not in HORIZONS:
+        raise ValueError(f'Dense policy requires chunk_size in {HORIZONS}')
     if cfg.num_denoising_steps_action < 1:
         raise ValueError('Positive denoising step count required')
 
 
-def validate_checkpoint_contract(checkpoint, stats_path):
+def validate_checkpoint_contract(checkpoint, stats_path, horizon=None):
+    """The run's identity must carry this contract and normalisation; with ``horizon`` given, also that chunk length."""
     path = Path(checkpoint).resolve()
     if path.name == 'model':
         path = path.parent
@@ -45,6 +54,8 @@ def validate_checkpoint_contract(checkpoint, stats_path):
     identity = json.loads((run / 'joint_contract.json').read_text())
     if identity['contract'] != CONTRACT or sha256(stats_path) != identity['statistics_sha256']:
         raise ValueError('Checkpoint and normalization belong to a different observation/action contract')
+    if horizon is not None and int(identity.get('horizon', HORIZON)) != int(horizon):
+        raise ValueError('Checkpoint was trained with a different chunk horizon')
     return identity
 
 
@@ -53,9 +64,9 @@ def load_dense_policy(cfg):
     from cosmos_policy.constants import ACTION_DIM, PROPRIO_DIM, NUM_ACTIONS_CHUNK
     from cosmos_policy.experiments.robot import cosmos_utils
     validate_dense_config(cfg)
-    if (NUM_ACTIONS_CHUNK, ACTION_DIM, PROPRIO_DIM) != (HORIZON, 4, 7):
-        raise ValueError('Set COSMOS_POLICY_PLATFORM=hanoi_dense before model imports')
-    identity = validate_checkpoint_contract(cfg.ckpt_path, cfg.dataset_stats_path)
+    if (NUM_ACTIONS_CHUNK, ACTION_DIM, PROPRIO_DIM) != (cfg.chunk_size, 4, 7):
+        raise ValueError('Set COSMOS_POLICY_PLATFORM=hanoi_dense and HANOI_DENSE_HORIZON to the chunk size before model imports')
+    identity = validate_checkpoint_contract(cfg.ckpt_path, cfg.dataset_stats_path, cfg.chunk_size)
     stats = json.loads(Path(cfg.dataset_stats_path).read_text())
     for group, size in [('proprio', 7), ('actions', 4)]:
         lo, hi = (np.asarray(stats[group + suffix], np.float32) for suffix in ('_min', '_max'))
@@ -98,14 +109,14 @@ def load_dense_policy(cfg):
 
 def threshold_jaw(actions):
     actions = np.asarray(actions, np.float32).copy()
-    if actions.shape != (HORIZON, 4) or not np.isfinite(actions).all():
-        raise ValueError('Expected sixteen finite absolute XYZ/jaw predictions')
+    if actions.ndim != 2 or actions.shape[1] != 4 or actions.shape[0] not in HORIZONS or not np.isfinite(actions).all():
+        raise ValueError('Expected a finite H x 4 chunk of absolute XYZ/jaw predictions')
     actions[:, 3] = actions[:, 3] >= .5
     return actions
 
 
 def predict_dense_actions(cfg, model, stats, image, state, *, seed=1, num_denoising_steps=None):
-    """Return the 16 x 4 absolute chunk; the executor commits the first EXECUTION_PREFIX rows."""
+    """Return the H x 4 absolute chunk (H = cfg.chunk_size); the executor commits the first EXECUTION_PREFIX rows."""
     from cosmos_policy.experiments.robot.cosmos_utils import get_action
     validate_dense_config(cfg)
     observation = make_joint_observation(image, state)
@@ -113,7 +124,10 @@ def predict_dense_actions(cfg, model, stats, image, state, *, seed=1, num_denois
     prediction = get_action(cfg, model, stats, observation, PROMPT, seed=seed, randomize_seed=False,
                             num_denoising_steps_action=steps,
                             generate_future_state_and_value_in_parallel=False, batch_size=1)
-    return threshold_jaw(prediction['actions'])
+    actions = threshold_jaw(prediction['actions'])
+    if actions.shape[0] != cfg.chunk_size:
+        raise ValueError('Predicted chunk length differs from the configured horizon')
+    return actions
 
 
 class HanoiDensePolicy:
@@ -124,7 +138,8 @@ class HanoiDensePolicy:
         export = Path(cfg.ckpt_path).resolve()
         self.identity = {
             'cosmos_hanoi': {
-                'contract': dict(DEPLOYMENT_CONTRACT), 'contract_name': CONTRACT, 'prompt': PROMPT,
+                'contract': deployment_contract(cfg.chunk_size), 'contract_name': CONTRACT, 'prompt': PROMPT,
+                'action_horizon': cfg.chunk_size,
                 'export_sha256': sha256(export) if export.is_file() else None, 'checkpoint': str(export),
                 'normalization_sha256': sha256(cfg.dataset_stats_path), 'num_steps': cfg.num_denoising_steps_action,
                 'config_name': cfg.config, 'reference_rate_hz': REFERENCE_RATE_HZ, 'execution_prefix': EXECUTION_PREFIX,
@@ -138,7 +153,8 @@ class HanoiDensePolicy:
             raise ValueError('This policy was trained for AAAA to CCCC only')
         actions = predict_dense_actions(self.cfg, self.model, self.stats, observation['observation/image'],
                                         observation['observation/state'], seed=seed)
-        return {'actions': actions, 'reference_rate_hz': REFERENCE_RATE_HZ, 'execution_prefix': EXECUTION_PREFIX}
+        return {'actions': actions, 'reference_rate_hz': REFERENCE_RATE_HZ, 'execution_prefix': EXECUTION_PREFIX,
+                'action_horizon': self.cfg.chunk_size}
 
 
 __all__ = ['HanoiDenseInferenceConfig', 'HanoiDensePolicy', 'load_dense_policy', 'predict_dense_actions',

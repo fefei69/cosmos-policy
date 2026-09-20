@@ -219,3 +219,90 @@ def test_selection_rule_and_metrics():
     assert s['xyz_mm']['endpoint_mean'] == 0 and s['value_abs_error']['mean'] == pytest.approx(0.1) and 'future_l1' not in s
     # Balanced accuracy: 14 valid slots, 8 closed (all correct) and 6 open (slot 9 predicted closed): (8/8 + 5/6) / 2.
     assert s['jaw']['accuracy_valid_slots'] == pytest.approx(13 / 14) and s['jaw']['balanced_accuracy_valid_slots'] == pytest.approx((1.0 + 5 / 6) / 2)
+
+
+def test_horizon_32_build_and_contract(tmp_path):
+    from cosmos_policy.datasets.hanoi_dense_data import HORIZONS, default_metadata, deployment_contract
+    with h5py.File(make_raw(tmp_path / 'raw.h5'), 'r') as h:
+        narrow, wide = build_split(h, range(1)), build_split(h, range(1), 32)
+        with pytest.raises(ValueError, match='horizon'):
+            build_split(h, range(1), 12)
+    assert wide['actions'].shape == (ROWS - 2, 32, 4) and wide['actions_is_pad'].shape == (ROWS - 2, 32)
+    np.testing.assert_array_equal(wide['actions'][:, :HORIZON], narrow['actions'])
+    np.testing.assert_array_equal(wide['actions_is_pad'][:, :HORIZON], narrow['actions_is_pad'])
+    np.testing.assert_array_equal(wide['source_action_indices'][:, :HORIZON], narrow['source_action_indices'])
+    assert not wide['actions_is_pad'][0].any() and wide['actions_is_pad'][-1].all()  # row 0 reaches row 96 < 119; the last row pads all
+    assert HORIZONS == (16, 32)
+    assert deployment_contract(32)['action_horizon'] == 32 and deployment_contract(32)['execution_prefix'] == 8
+    assert DEPLOYMENT_CONTRACT['action_horizon'] == HORIZON
+    assert default_metadata(32).name == 'dense_v5_h32' and default_metadata(HORIZON).name == 'dense_v5'
+    with pytest.raises(ValueError):
+        deployment_contract(12)
+
+
+def test_dense_dataset_horizon_32(tmp_path):
+    raw = make_raw(tmp_path / 'raw.h5')
+    with h5py.File(raw, 'r') as h:
+        arrays = build_split(h, range(1), 32)
+    root = tmp_path / 'dense_h32'; root.mkdir()
+    np.savez(root / 'train.npz', **arrays)
+    stats = fit_statistics(arrays)
+    (root / 'dataset_statistics.json').write_text(json.dumps(stats))
+    metadata = {'contract': CONTRACT, 'horizon': 32, 'frameskip': FRAMESKIP, 'raw_path': str(raw),
+                'raw_size_bytes': raw.stat().st_size, 'raw_mtime_ns': raw.stat().st_mtime_ns,
+                'splits': {'train': {'sha256': sha256(root / 'train.npz'), 'samples': len(arrays['states'])}},
+                'statistics_sha256': sha256(root / 'dataset_statistics.json')}
+    (root / 'metadata.json').write_text(json.dumps(metadata))
+    embeddings = tmp_path / 'embeddings.pkl'
+    with embeddings.open('wb') as f:
+        pickle.dump({PROMPT: torch.zeros(512, 1024, dtype=torch.bfloat16)}, f)
+    ds = HanoiDenseDataset(root, embeddings)
+    item = ds[0]
+    assert ds.horizon == 32 and item['actions'].shape == (32, 4)
+    assert item['auxiliary_future_source_row'] == int(arrays['source_observation_indices'][0]) + FRAMESKIP * 32  # the end of the chunk
+    ds.close()
+    metadata['horizon'] = 12
+    (root / 'metadata.json').write_text(json.dumps(metadata))
+    with pytest.raises(ValueError, match='geometry'):
+        HanoiDenseDataset(root, embeddings)
+
+
+def test_cross_check_compares_the_shared_slots(tmp_path):
+    with h5py.File(make_raw(tmp_path / 'raw.h5'), 'r') as h:
+        ours = {'train': build_split(h, range(1), 32)}
+        narrower = build_split(h, range(1))  # an archive with fewer slots, laid out like the OpenPI build
+    theirs = tmp_path / 'openpi' / 'indices'; theirs.mkdir(parents=True)
+    np.savez(theirs / 'aaaa_to_cccc_train.npz', **narrower)
+    entry = cross_check_openpi(tmp_path / 'openpi', ours)['splits']['train']
+    assert entry['status'] == 'match' and (entry['compared_slots'], entry['their_horizon'], entry['our_horizon']) == (16, 16, 32)
+    assert 'actions_first_16_slots' in entry['checks']
+
+
+def test_summarize_reports_first_16_and_horizon():
+    target = np.zeros((32, 4), np.float32)
+    predicted = target.copy(); predicted[16:, 0] = 0.01  # 10 mm error on slots 17 to 32 only
+    m = per_sample_metrics(predicted, target, np.zeros(32, bool), 0.0)
+    m.update({'target_jaw': target[:, 3], 'stationary': False, 'value_abs_error': None, 'future_l1': None, 'future_psnr_db': None})
+    s = summarize([m])
+    assert s['horizon'] == 32 and len(s['xyz_mm']['per_slot_mean']) == 32
+    assert s['xyz_mm']['mean_valid_slots_first_16'] == 0 and s['xyz_mm']['mean_valid_slots'] == pytest.approx(5.0)
+    assert s['xyz_mm']['endpoint_mean'] == pytest.approx(10.0)
+
+
+def test_inference_horizon_checks(tmp_path):
+    cfg = HanoiDenseInferenceConfig('ckpt.pt', 'stats.json', 'emb.pkl', chunk_size=32)
+    validate_dense_config(cfg)
+    run = tmp_path / 'run'; (run / 'exports').mkdir(parents=True)
+    stats = tmp_path / 'stats.json'; stats.write_text('{}')
+    export = run / 'exports' / 'iter_000001000.pt'
+    (run / 'joint_contract.json').write_text(json.dumps({'contract': CONTRACT, 'statistics_sha256': sha256(stats)}))
+    assert validate_checkpoint_contract(export, stats, HORIZON)['contract'] == CONTRACT  # run B identities carry no horizon key: 16
+    with pytest.raises(ValueError, match='horizon'):
+        validate_checkpoint_contract(export, stats, 32)
+    (run / 'joint_contract.json').write_text(json.dumps({'contract': CONTRACT, 'horizon': 32, 'statistics_sha256': sha256(stats)}))
+    assert validate_checkpoint_contract(export, stats, 32)['horizon'] == 32
+    assert threshold_jaw(np.zeros((32, 4), np.float32)).shape == (32, 4)
+    with pytest.raises(ValueError):
+        threshold_jaw(np.zeros((24, 4), np.float32))
+    from examples.hanoi.run_dense import run_name_for
+    assert run_name_for('video', HORIZON).endswith('_video_init') and run_name_for('video', 32).endswith('_video_init_h32')

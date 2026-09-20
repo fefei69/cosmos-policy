@@ -1,4 +1,9 @@
-data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init/exports/iter_000016000.pt
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init_cycle2/exports/iter_000016000.pt
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init_cycle2/joint_contract.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init_cycle2/run_notes.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init_cycle2/selection.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init_cycle2/selected_validation.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init_cycle2/selected_test.json
 data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init/joint_contract.json
 data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init/code_updates.json
 data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init/selection.json
@@ -7,6 +12,7 @@ data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_ini
 data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dense_20260919_video_init/evaluation/path_deviation_probe.json
 data/hanoi_cosmos/dense_v5/dataset_statistics.json
 data/hanoi_cosmos/dense_v5/metadata.json
+data/hanoi_cosmos/dense_v5/openpi_cross_check.json
 data/hanoi_cosmos/t5_embeddings.pkl
 checkpoints/public/Wan2.1_VAE.pth
 checkpoints/public/manifest.json

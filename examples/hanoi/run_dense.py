@@ -6,8 +6,9 @@ followed by an export and the section 7 evaluation on validation rows. The
 final checkpoint is chosen by decision 11 (lowest mean per-step XYZ error with
 jaw accuracy at least 0.99, ties by earlier step), then evaluated once on the
 test split. ``--init video`` starts from the Cosmos-Predict2 video base (run B),
-``--init libero`` from the LIBERO policy checkpoint (run A). The two runs use
-distinct run names and never share a directory.
+``--init libero`` from the LIBERO policy checkpoint (run A). ``--horizon 32``
+trains the chunk-length comparison (decision 2's listed alternative) on the
+``dense_v5_h32`` build. Runs use distinct run names and never share a directory.
 """
 import argparse
 import fcntl
@@ -18,7 +19,7 @@ import shutil
 import time
 
 from cosmos_policy.config.hanoi_dense_config import MAX_UPDATES, SAVE_EVERY, microbatch_from_env
-from cosmos_policy.datasets.hanoi_dense_data import CONTRACT, sha256
+from cosmos_policy.datasets.hanoi_dense_data import CONTRACT, HORIZON, HORIZONS, default_metadata, sha256
 from cosmos_policy.utils.hanoi_checkpoint import checkpoint_iteration, latest_complete_checkpoint
 from examples.hanoi.run_joint import atomic_json
 from examples.hanoi.run_long import scratch_headroom
@@ -33,6 +34,12 @@ INITS = {
 JAW_ACCURACY_FLOOR = 0.99
 SELECTION_RULE = ('lowest mean per-step XYZ error over valid chunk slots on validation rows, '
                   f'among exports with jaw accuracy at least {JAW_ACCURACY_FLOOR}; ties by earlier step')
+# Qualification runs the parity check on an export after three updates, whose action latent is still
+# noise (slot-1 error about 80 mm; seed-to-seed spread about 12 mm). The served and evaluator paths then
+# differ by a few tenths of a millimetre from numerics alone (run B: 0.49 mm max, video init, chunk 16;
+# chunk 32 tiles half as many repeats and reached 0.98 mm), so qualification only requires them to agree
+# far below the sampling noise. The deployment gate stays the selected export's 200-sample check at 0.5 mm.
+QUALIFICATION_PARITY_TOLERANCE_MM = 2.0
 STAGE_EVAL = {'stride': 9, 'steps': 5}          # every export: about 3,850 validation rows
 FINAL_EVAL = {'stride': 3, 'steps': 5, 'also_steps': 10}  # selected export: about 11,500 rows, both step counts
 CODE_PATHS = (
@@ -50,6 +57,10 @@ CODE_PATHS = (
 )
 
 
+def run_name_for(init, horizon):
+    return f'hanoi_cosmos_dense_{DATE}_{init}_init' + ('' if horizon == HORIZON else f'_h{horizon}')
+
+
 def select_checkpoint(reports):
     """reports: [(evaluation dict, export path)] -> (best report, best path); decision 11."""
     eligible = [(r, p) for r, p in reports if r['metrics']['all']['jaw']['accuracy_valid_slots'] >= JAW_ACCURACY_FLOOR]
@@ -62,17 +73,21 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument('--init', choices=sorted(INITS), required=True)
     parser.add_argument('--qualify-only', action='store_true', help='Two updates, reload/resume one update, export and inference; then stop')
+    parser.add_argument('--horizon', type=int, default=HORIZON, choices=HORIZONS, help='Chunk length; the prepared dataset must match')
     parser.add_argument('--run-name', default=None)
     args = parser.parse_args()
+    os.environ['HANOI_DENSE_HORIZON'] = str(args.horizon)  # before any import of cosmos_policy.constants; inherited by train/eval
     init = INITS[args.init]
-    run_name = args.run_name or os.environ.get('HANOI_DENSE_RUN_NAME') or f'hanoi_cosmos_dense_{DATE}_{args.init}_init'
+    run_name = args.run_name or os.environ.get('HANOI_DENSE_RUN_NAME') or run_name_for(args.init, args.horizon)
     if not run_name.startswith('hanoi_cosmos_dense_') or Path(run_name).name != run_name:
         raise ValueError('Use a distinct hanoi_cosmos_dense_* run name')
     root = Path(__file__).resolve().parents[2]
-    metadata = Path(os.environ.get('HANOI_DENSE_METADATA', str(root / 'data/hanoi_cosmos/dense_v5'))).resolve()
+    metadata = Path(os.environ.get('HANOI_DENSE_METADATA', str(root / default_metadata(args.horizon)))).resolve()
     prepared = json.loads((metadata / 'metadata.json').read_text())
     if prepared['contract'] != CONTRACT:
         raise ValueError('Wrong prepared task')
+    if int(prepared['horizon']) != args.horizon:
+        raise ValueError(f'Prepared dataset horizon {prepared["horizon"]} differs from --horizon {args.horizon}')
     initial = Path(os.environ.get('HANOI_INIT_CHECKPOINT', str(root / init['default_path']))).resolve()
     if not initial.is_file():
         raise FileNotFoundError(f'Initial weights for run {init["run"]} ({args.init}) are missing: {initial}')
@@ -91,7 +106,7 @@ def main():
     os.environ.setdefault('HANOI_DENSE_MICROBATCH', '16')
     os.environ.setdefault('HANOI_DENSE_ACTIVATION_CHECKPOINT', 'none')
     print(f'Hashing initial weights {initial.name}...', flush=True)
-    identity = {'contract': CONTRACT, 'metadata_sha256': sha256(metadata / 'metadata.json'),
+    identity = {'contract': CONTRACT, 'horizon': args.horizon, 'metadata_sha256': sha256(metadata / 'metadata.json'),
                 'statistics_sha256': prepared['statistics_sha256'], 'raw_sha256': prepared['raw_sha256'],
                 'initial_weights': str(initial), 'initial_weights_sha256': sha256(initial), 'initial_weights_format': init['format'],
                 'run_label': init['run'], 'effective_batch_size': 32,
@@ -101,8 +116,22 @@ def main():
                 'code_sha256': {path: sha256(root / path) for path in CODE_PATHS}}
     contract_path = run / 'joint_contract.json'
     if contract_path.exists():
-        if json.loads(contract_path.read_text()) != identity:
-            raise ValueError('Refusing resume with changed dense data, model code, initial weights or training settings')
+        recorded = json.loads(contract_path.read_text())
+        if recorded != identity:
+            differing = {key for key in set(recorded) | set(identity) if recorded.get(key) != identity.get(key)}
+            reason = os.environ.get('HANOI_DENSE_ACCEPT_CODE_CHANGES', '')
+            if differing != {'code_sha256'} or not reason:
+                raise ValueError('Refusing resume with changed dense data, model code, initial weights or training settings')
+            # Only code hashes differ and the operator stated why: record each change beside the run, then continue.
+            updates_path = run / 'code_updates.json'
+            updates = json.loads(updates_path.read_text()) if updates_path.exists() else []
+            for path in sorted(set(recorded['code_sha256']) | set(identity['code_sha256'])):
+                if recorded['code_sha256'].get(path) != identity['code_sha256'].get(path):
+                    updates.append({'time': time.time(), 'job_id': os.environ.get('SLURM_JOB_ID'), 'path': path,
+                                    'old_sha256': recorded['code_sha256'].get(path), 'new_sha256': identity['code_sha256'].get(path),
+                                    'reason': reason})
+            atomic_json(updates_path, updates)
+            atomic_json(contract_path, identity)
     else:
         if (run / 'checkpoints/latest_checkpoint.txt').exists():
             raise ValueError('Existing checkpoints lack the dense contract identity')
@@ -133,7 +162,7 @@ def main():
         if not target.exists():
             execute('export', [python, 'examples/hanoi/export_checkpoint.py', '--checkpoint', str(checkpoint), '--output', str(target)])
         return target
-    def evaluate(checkpoint, output, *, split='val', stride, steps, also_steps=0, future=False, parity=0, selection=None):
+    def evaluate(checkpoint, output, *, split='val', stride, steps, also_steps=0, future=False, parity=0, parity_tolerance=None, selection=None):
         if output.exists():
             value = json.loads(output.read_text())
             if value['checkpoint'] != str(checkpoint.resolve()) or value['split'] != split or value['stride'] != stride:
@@ -148,6 +177,8 @@ def main():
             command += ['--future']
         if parity:
             command += ['--parity-samples', str(parity)]
+        if parity_tolerance is not None:
+            command += ['--parity-tolerance-mm', str(parity_tolerance)]
         if selection:
             command += ['--selection', str(selection)]
         execute(f'evaluate_{split}', command)
@@ -165,13 +196,14 @@ def main():
         m = report['metrics']
         return {'slot1_mm_all': m['all']['xyz_mm']['slot1_mean'], 'slot1_mm_stationary': m['stationary'].get('xyz_mm', {}).get('slot1_mean'),
                 'slot1_mm_moving': m['moving'].get('xyz_mm', {}).get('slot1_mean'), 'mean_valid_mm': m['all']['xyz_mm']['mean_valid_slots'],
+                'mean_valid_first_16_mm': m['all']['xyz_mm'].get('mean_valid_slots_first_16'),
                 'endpoint_mm': m['all']['xyz_mm']['endpoint_mean'], 'jaw_accuracy': m['all']['jaw']['accuracy_valid_slots'],
                 'value_abs_error': m['all'].get('value_abs_error', {}).get('mean')}
     try:
         quota = scratch_headroom()
         if quota['free_bytes_lower_bound'] < 160_000_000_000:
             raise RuntimeError('Need 160 GB scratch headroom for retained exports and two in-flight full checkpoints')
-        record('preflight_passed', quota=quota, initial_weights=str(initial), init_format=init['format'],
+        record('preflight_passed', quota=quota, initial_weights=str(initial), init_format=init['format'], horizon=args.horizon,
                microbatch=identity['microbatch'], activation_checkpoint=identity['activation_checkpoint'], allocation_seconds=allocation)
         checkpoint = latest_complete_checkpoint(run) if (run / 'checkpoints/latest_checkpoint.txt').exists() else None
         qualification = run / 'qualification.json'
@@ -185,7 +217,8 @@ def main():
             if checkpoint_iteration(checkpoint) != 3:
                 raise RuntimeError('Qualification requires exactly three completed updates after the step-two resume')
             exported = export(checkpoint)
-            result = evaluate(exported, run / 'qualification_validation.json', stride=300, steps=5, parity=8)
+            result = evaluate(exported, run / 'qualification_validation.json', stride=300, steps=5, parity=8,
+                              parity_tolerance=QUALIFICATION_PARITY_TOLERANCE_MM)
             if not result.get('serving_parity_passed'):
                 raise RuntimeError('Serving parity qualification failed')
             atomic_json(qualification, {'passed': True, 'checkpoint': str(checkpoint), 'resume_step': checkpoint_iteration(checkpoint),

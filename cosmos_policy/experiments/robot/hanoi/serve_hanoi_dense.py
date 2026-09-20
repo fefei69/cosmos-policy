@@ -2,9 +2,10 @@
 
 Request (JSON, ``json_numpy`` encoded like the ALOHA server, or lists):
 ``{"observation/image": (224, 224, 3) uint8, "observation/state": (7,) float32,
-"prompt": optional}``. Reply: ``{"actions": (16, 4) float32 absolute XYZ + jaw
-intent 0/1, "reference_rate_hz": 10, "execution_prefix": 8, "cosmos_hanoi":
-identity}``. ``GET /identity`` returns the identity alone so the client can
+"prompt": optional}``. Reply: ``{"actions": (H, 4) float32 absolute XYZ + jaw
+intent 0/1, "reference_rate_hz": 10, "execution_prefix": 8, "action_horizon": H,
+"cosmos_hanoi": identity}`` where H (16, or 32 for the comparison run) comes from
+the run's ``joint_contract.json``. ``GET /identity`` returns the identity alone so the client can
 compare the contract before driving the arm. Server dependencies
 (``fastapi``, ``uvicorn``, ``json_numpy``) are deployment-side extras; this
 module is not exercised on the cluster.
@@ -63,10 +64,16 @@ def main():
     parser.add_argument('--host', default='0.0.0.0')
     parser.add_argument('--port', type=int, default=8777)
     args = parser.parse_args()
+    import json
     import os
+    from pathlib import Path
+    run = Path(args.checkpoint).resolve().parent.parent  # run/exports/iter_*.pt
+    horizon = int(json.loads((run / 'joint_contract.json').read_text()).get('horizon', 16))
     os.environ['COSMOS_POLICY_PLATFORM'] = 'hanoi_dense'
+    os.environ['HANOI_DENSE_HORIZON'] = str(horizon)
     import uvicorn
-    policy = HanoiDensePolicy(HanoiDenseInferenceConfig(args.checkpoint, args.stats, args.embeddings, num_denoising_steps_action=args.steps))
+    policy = HanoiDensePolicy(HanoiDenseInferenceConfig(args.checkpoint, args.stats, args.embeddings,
+                                                        num_denoising_steps_action=args.steps, chunk_size=horizon))
     logging.info('identity: %s', policy.identity)
     uvicorn.run(build_app(policy), host=args.host, port=args.port)
 

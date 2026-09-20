@@ -2,9 +2,10 @@
 
 Same seven-slot packing as the joint/waypoint datasets (blank, proprio, RGB,
 actions, future proprio, future RGB, value). Differences: the action chunk is
-16 x 4 absolute reference poses normalised with the training min/max (no
+H x 4 absolute reference poses (H = 16, or 32 for the chunk-length comparison
+run, read from the prepared metadata) normalised with the training min/max (no
 relative conversion), and the auxiliary future row is the end of the chunk,
-t + 48 raw rows, clamped to the episode end.
+t + 3 H raw rows, clamped to the episode end.
 """
 from __future__ import annotations
 
@@ -16,11 +17,11 @@ import numpy as np
 import torch
 
 from cosmos_policy.datasets.hanoi_data import normalize
-from cosmos_policy.datasets.hanoi_dense_data import CONTRACT, DEFAULT_METADATA, FRAMESKIP, HORIZON
+from cosmos_policy.datasets.hanoi_dense_data import CONTRACT, DEFAULT_METADATA, FRAMESKIP, HORIZON, HORIZONS
 from cosmos_policy.datasets.hanoi_joint_data import PROMPT, read_archive, sha256
 from cosmos_policy.datasets.hanoi_joint_dataset import HanoiJointDataset
 
-FUTURE_ROWS = FRAMESKIP * HORIZON  # 48 raw rows, 1.6 s
+FUTURE_ROWS = FRAMESKIP * HORIZON  # 48 raw rows (1.6 s) at the default horizon; a dataset uses FRAMESKIP times its own horizon
 
 
 class HanoiDenseDataset(HanoiJointDataset):
@@ -37,8 +38,10 @@ class HanoiDenseDataset(HanoiJointDataset):
         self.metadata = json.loads((root / 'metadata.json').read_text())
         if self.metadata['contract'] != CONTRACT or (root / 'PREPARATION_FAILED').exists():
             raise ValueError('Wrong/incomplete dense dataset contract')
-        if (self.metadata['horizon'], self.metadata['frameskip']) != (HORIZON, FRAMESKIP):
+        self.horizon = int(self.metadata['horizon'])
+        if self.horizon not in HORIZONS or self.metadata['frameskip'] != FRAMESKIP:
             raise ValueError('Prepared chunk geometry differs from this contract')
+        self.future_rows = FRAMESKIP * self.horizon  # the end of the chunk
         self.source = Path(self.metadata['raw_path'])
         identity = self.source.stat()
         if (identity.st_size, identity.st_mtime_ns) != (self.metadata['raw_size_bytes'], self.metadata['raw_mtime_ns']):
@@ -52,7 +55,7 @@ class HanoiDenseDataset(HanoiJointDataset):
         self.stats = json.loads((root / 'dataset_statistics.json').read_text())
         self.split, self.gamma = split, gamma
         n = self.metadata['splits'][split]['samples']
-        if self.arrays['states'].shape != (n, 7) or self.arrays['actions'].shape != (n, HORIZON, 4):
+        if self.arrays['states'].shape != (n, 7) or self.arrays['actions'].shape != (n, self.horizon, 4):
             raise ValueError('Archive shapes differ from the prepared contract')
         with open(t5_text_embeddings_path, 'rb') as stream:
             cache = pickle.load(stream)
@@ -91,7 +94,7 @@ class HanoiDenseDataset(HanoiJointDataset):
         sample = self.raw_example(index)
         i, handle = sample['archive_index'], self._file()
         end = int(self.arrays['source_episode_bounds'][i, 1])
-        future_row = min(sample['source_observation_index'] + FUTURE_ROWS, end - 1)
+        future_row = min(sample['source_observation_index'] + self.future_rows, end - 1)
         future_state = np.r_[handle['joint_positions'][future_row], handle['proprio'][future_row, 6]].astype(np.float32)
         current, future = sample['image'], handle['pixels'][future_row]
         blank = np.zeros_like(current)

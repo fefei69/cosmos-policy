@@ -16,6 +16,10 @@
 #   sbatch examples/hanoi/train_dense.sbatch --init libero   # run A
 #   sbatch examples/hanoi/train_dense.sbatch --init video    # run B
 #   sbatch --dependency=afterany:<jobid> examples/hanoi/train_dense.sbatch --init <same>   # continuation
+#   sbatch examples/hanoi/train_dense.sbatch --init video --horizon 32 --run-name <name>_h32   # chunk-32 comparison (dense_v5_h32)
+# A continuation whose dense code changed since the run started is refused unless
+# HANOI_DENSE_ACCEPT_CODE_CHANGES="<reason>" is exported; the launcher then records
+# every changed file's old and new hash in the run's code_updates.json.
 set -euo pipefail
 source examples/hanoi/env.sh
 export COSMOS_POLICY_PLATFORM=hanoi_dense

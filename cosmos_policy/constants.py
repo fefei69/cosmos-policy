@@ -56,12 +56,17 @@ HANOI_JOINT_CONSTANTS = {
     "PROPRIO_DIM": 7,
 }
 
-# Dense 10 Hz chunk of absolute reference poses (contract hanoi_dense_v5).
+# Dense 10 Hz chunk of absolute reference poses (contract hanoi_dense_v5). The
+# chunk length is the prepared dataset's horizon: 16 (decision 2) or 32 (the
+# comparison run); HANOI_DENSE_HORIZON must match the dataset and checkpoint.
+HANOI_DENSE_HORIZONS = (16, 32)
 HANOI_DENSE_CONSTANTS = {
-    "NUM_ACTIONS_CHUNK": 16,
+    "NUM_ACTIONS_CHUNK": int(os.environ.get("HANOI_DENSE_HORIZON", "16")),
     "ACTION_DIM": 4,
     "PROPRIO_DIM": 7,
 }
+if HANOI_DENSE_CONSTANTS["NUM_ACTIONS_CHUNK"] not in HANOI_DENSE_HORIZONS:
+    raise ValueError(f"HANOI_DENSE_HORIZON must be one of {HANOI_DENSE_HORIZONS}")
 
 
 # Function to detect robot platform from command line arguments

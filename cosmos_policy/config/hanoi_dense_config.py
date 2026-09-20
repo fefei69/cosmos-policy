@@ -4,7 +4,8 @@ Built on the base Hanoi config (same network, optimizer, precision, loss and
 latent-slot layout) with the waypoint_v4 training settings and these dense
 decisions from docs/hanoi_dense_training_guide.md:
 
-* platform ``hanoi_dense`` (chunk 16 x 4, state 7);
+* platform ``hanoi_dense`` (chunk 16 x 4; 32 x 4 for the chunk-length comparison
+  run, selected with ``HANOI_DENSE_HORIZON`` to match the prepared dataset; state 7);
 * dataset ``HanoiDenseDataset`` over ``data/hanoi_cosmos/dense_v5``;
 * effective batch 32 as micro-batch 16 x 2, no block recompute, metrics read
   from the GPU once per logging interval (all tunable by environment);
@@ -14,6 +15,7 @@ decisions from docs/hanoi_dense_training_guide.md:
 * initial weights from ``HANOI_INIT_CHECKPOINT`` with ``HANOI_INIT_FORMAT``
   ``video_base`` (run B) or ``policy`` (run A, the LIBERO checkpoint).
 """
+import json
 import os
 from pathlib import Path
 
@@ -63,6 +65,12 @@ def make_config():
     c = base_config()
     root = Path(__file__).resolve().parents[2]
     metadata = os.environ.get('HANOI_DENSE_METADATA', str(root / 'data/hanoi_cosmos/dense_v5'))
+    prepared = Path(metadata) / 'metadata.json'
+    if prepared.exists():  # Training always has the prepared dataset; a deployment host loading an export may not.
+        from cosmos_policy.constants import NUM_ACTIONS_CHUNK
+        horizon = int(json.loads(prepared.read_text())['horizon'])
+        if NUM_ACTIONS_CHUNK != horizon:
+            raise ValueError(f'HANOI_DENSE_HORIZON={NUM_ACTIONS_CHUNK} but the prepared dataset at {metadata} has horizon {horizon}')
     embeddings = os.environ.get('HANOI_T5_EMBEDDINGS', str(root / 'data/hanoi_cosmos/t5_embeddings.pkl'))
     micro = microbatch_from_env()
 

@@ -19,6 +19,7 @@ import numpy as np
 from cosmos_policy.datasets.hanoi_dense_data import FRAMESKIP, HORIZON, STATIONARY_SPEED_M_PER_S
 
 ACCEPTED_GPUS = ('H100', 'H200')
+COMPARISON_SLOTS = HORIZON  # like-for-like mean over the first 16 slots (1.6 s), whatever the chunk length
 HANOI_UNDO_INJECTION = [0, 1, 3, 4]  # blank, proprio, action, future proprio: as the hanoi suite decodes
 FUTURE_FRAME_INDEX = (5 - 1) * 4 + 1  # latent slot 5 -> raw frame 17 of the 25-frame packing
 
@@ -43,7 +44,7 @@ def flip_slot(jaw_sequence, current):
 
 
 def per_sample_metrics(predicted, target, pad, current_jaw):
-    """predicted/target (16, 4) absolute; pad (16,) bool; current_jaw 0/1 at the observation row."""
+    """predicted/target (H, 4) absolute; pad (H,) bool; current_jaw 0/1 at the observation row."""
     valid = ~pad
     if not valid.any():
         return None  # Observation within the last three rows of its episode: no unpadded slot to score.
@@ -63,8 +64,10 @@ def summarize(samples, tolerance_mm=2.0):
     valid = np.stack([s['valid'] for s in samples])
     jaw = np.stack([s['jaw_correct'] for s in samples])
     targets = np.stack([s['target_jaw'] for s in samples])
-    per_slot_mean = [float(errors[valid[:, j], j].mean()) if valid[:, j].any() else None for j in range(HORIZON)]
-    per_slot_jaw = [float(jaw[valid[:, j], j].mean()) if valid[:, j].any() else None for j in range(HORIZON)]
+    horizon = int(errors.shape[1])
+    per_slot_mean = [float(errors[valid[:, j], j].mean()) if valid[:, j].any() else None for j in range(horizon)]
+    per_slot_jaw = [float(jaw[valid[:, j], j].mean()) if valid[:, j].any() else None for j in range(horizon)]
+    head = valid[:, :COMPARISON_SLOTS]
     slot1 = errors[:, 0]
     endpoint = np.array([s['endpoint_mm'] for s in samples])
     truth, correct = targets[valid].astype(bool), jaw[valid].astype(bool)  # jaw holds per-slot correctness
@@ -77,7 +80,9 @@ def summarize(samples, tolerance_mm=2.0):
     spurious = sum(1 for s in samples if s['true_flip_slot'] < 0 and s['predicted_flip_slot'] >= 0)
     result = {
         'samples': len(samples),
+        'horizon': horizon,
         'xyz_mm': {'mean_valid_slots': float(errors[valid].mean()), 'p95_valid_slots': float(np.percentile(errors[valid], 95)),
+                   'mean_valid_slots_first_16': float(errors[:, :COMPARISON_SLOTS][head].mean()) if head.any() else None,
                    'per_slot_mean': per_slot_mean,
                    'slot1_mean': float(slot1.mean()), 'slot1_median': float(np.median(slot1)), 'slot1_p95': float(np.percentile(slot1, 95)),
                    'slot1_within_tolerance_fraction': float((slot1 <= tolerance_mm).mean()), 'tolerance_mm': tolerance_mm,
@@ -121,7 +126,9 @@ def main():
         selection = json.loads(args.selection.read_text())
         if Path(selection['checkpoint']).resolve() != args.checkpoint.resolve():
             raise ValueError('Test checkpoint differs from the locked validation choice')
+    horizon = int(json.loads((args.metadata / 'metadata.json').read_text())['horizon'])
     os.environ['COSMOS_POLICY_PLATFORM'] = 'hanoi_dense'
+    os.environ.setdefault('HANOI_DENSE_HORIZON', str(horizon))  # a different inherited value fails loudly in load_dense_policy
     import torch
     from torch.utils.data import DataLoader, Subset
     from cosmos_policy.datasets.hanoi_dense_dataset import HanoiDenseDataset
@@ -133,14 +140,14 @@ def main():
     if torch.cuda.device_count() != 1 or not any(tag in gpu for tag in ACCEPTED_GPUS):
         raise RuntimeError(f'Evaluate on one H100 or H200, not {gpu!r} x{torch.cuda.device_count()}')
     cfg = HanoiDenseInferenceConfig(str(args.checkpoint), str(args.metadata / 'dataset_statistics.json'), args.embeddings,
-                                    num_denoising_steps_action=args.steps)
+                                    num_denoising_steps_action=args.steps, chunk_size=horizon)
     model, stats, _, identity = load_dense_policy(cfg)
     dataset = HanoiDenseDataset(str(args.metadata), args.embeddings, split=args.split, representative_order=False)
     selected, phases = select_rows(dataset, args.stride)
     arrays = dataset.arrays
     raw_rows = arrays['source_observation_indices'][selected]
     current_jaw = dataset._file()['action_abs'][:, 3][raw_rows]  # jaw intent at the observation row, audit input only
-    report = {'checkpoint': str(args.checkpoint.resolve()), 'split': args.split, 'contract': identity['contract'],
+    report = {'checkpoint': str(args.checkpoint.resolve()), 'split': args.split, 'contract': identity['contract'], 'horizon': horizon,
               'metadata': str(args.metadata.resolve()), 'gpu': gpu, 'torch': torch.__version__,
               'stride': args.stride, 'phases': phases, 'num_samples': int(len(selected)), 'batch_size': args.batch_size,
               'denoising_steps': args.steps, 'stationary_definition': f'finite-difference measured speed under {STATIONARY_SPEED_M_PER_S} m/s',
@@ -170,7 +177,7 @@ def main():
                 latent, clean = model.generate_samples_from_batch(
                     data_batch, n_sample=n, num_steps=steps, seed=195 + b, is_negative_prompt=False,
                     use_variance_scale=False, return_orig_clean_latent_frames=True)
-                actions = extract_action_chunk_from_latent_sequence(latent, (HORIZON, 4), data_batch['action_latent_idx']).float().cpu().numpy()
+                actions = extract_action_chunk_from_latent_sequence(latent, (horizon, 4), data_batch['action_latent_idx']).float().cpu().numpy()
                 actions = unnormalize_actions(actions, stats)
                 values = extract_value_from_latent_sequence(latent, data_batch['value_latent_idx']).float().cpu().numpy()
                 future_l1 = future_psnr = None
@@ -245,7 +252,7 @@ def main():
                                                               is_negative_prompt=False, use_variance_scale=False,
                                                               return_orig_clean_latent_frames=True)
                 evaluated = threshold_jaw(unnormalize_actions(
-                    extract_action_chunk_from_latent_sequence(latent, (HORIZON, 4), single['action_latent_idx']).float().cpu().numpy(), stats)[0])
+                    extract_action_chunk_from_latent_sequence(latent, (horizon, 4), single['action_latent_idx']).float().cpu().numpy(), stats)[0])
                 differences.append(float(np.linalg.norm(served[0, :3] - evaluated[0, :3]) * 1000))
                 batched_differences.append(float(np.linalg.norm(served[0, :3] - np.asarray(by_index[int(i)]['predicted_slot1'])[:3]) * 1000))
         report['serving_parity'] = {

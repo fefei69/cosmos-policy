@@ -15,9 +15,7 @@ from pathlib import Path
 
 import numpy as np
 
-from cosmos_policy.datasets.hanoi_dense_data import FRAMESKIP, HORIZON
-
-WINDOW_ROWS = FRAMESKIP * HORIZON + 30  # trajectory context after the observation: the chunk plus one second
+from cosmos_policy.datasets.hanoi_dense_data import FRAMESKIP
 
 
 def nearest_on_polyline(points, q):
@@ -41,7 +39,10 @@ def main():
     parser.add_argument('--steps', type=int, default=5)
     parser.add_argument('--output', type=Path, required=True)
     args = parser.parse_args()
+    horizon = int(json.loads((args.metadata / 'metadata.json').read_text())['horizon'])
+    window_rows = FRAMESKIP * horizon + 30  # trajectory context after the observation: the chunk plus one second
     os.environ['COSMOS_POLICY_PLATFORM'] = 'hanoi_dense'
+    os.environ.setdefault('HANOI_DENSE_HORIZON', str(horizon))
     import h5py
     import torch
     from torch.utils.data import DataLoader, Subset
@@ -51,7 +52,7 @@ def main():
     from cosmos_policy.experiments.robot.hanoi.run_hanoi_dense_eval import select_rows
 
     cfg = HanoiDenseInferenceConfig(str(args.checkpoint), str(args.metadata / 'dataset_statistics.json'), args.embeddings,
-                                    num_denoising_steps_action=args.steps)
+                                    num_denoising_steps_action=args.steps, chunk_size=horizon)
     model, stats, _, _ = load_dense_policy(cfg)
     dataset = HanoiDenseDataset(str(args.metadata), args.embeddings, split='val', representative_order=False)
     selected, _ = select_rows(dataset, args.stride)
@@ -80,19 +81,19 @@ def main():
                                                           is_negative_prompt=False, use_variance_scale=False,
                                                           return_orig_clean_latent_frames=True)
             actions = unnormalize_actions(extract_action_chunk_from_latent_sequence(
-                latent, (HORIZON, 4), data_batch['action_latent_idx']).float().cpu().numpy(), stats)
+                latent, (horizon, 4), data_batch['action_latent_idx']).float().cpu().numpy(), stats)
             for k in range(n):
                 i = int(batch['__key__'][k])
                 pad = arrays['actions_is_pad'][i]
                 if pad.all():
                     continue
                 row = int(arrays['source_observation_indices'][i]); end = int(arrays['source_episode_bounds'][i, 1])
-                path = reference[row:min(row + WINDOW_ROWS, end)]
+                path = reference[row:min(row + window_rows, end)]
                 target = arrays['actions'][i][:, :3].astype(np.float64)
                 predicted = actions[k][:, :3].astype(np.float64)
                 total = np.linalg.norm(predicted - target, axis=1) * 1000
-                off_path, timing_rows = np.full(HORIZON, np.nan), np.full(HORIZON, np.nan)
-                for j in range(HORIZON):
+                off_path, timing_rows = np.full(horizon, np.nan), np.full(horizon, np.nan)
+                for j in range(horizon):
                     if pad[j]:
                         continue
                     d, where = nearest_on_polyline(path, predicted[j])
@@ -107,12 +108,12 @@ def main():
             return {'samples': 0}
         total = np.array([r['total_mm'] for r in subset]); off = np.array([r['off_path_mm'] for r in subset]); tim = np.array([r['timing_rows'] for r in subset])
         return {'samples': len(subset),
-                'total_mm_per_slot': [float(np.nanmean(total[:, j])) for j in range(HORIZON)],
-                'off_path_mm_per_slot': [float(np.nanmean(off[:, j])) for j in range(HORIZON)],
-                'off_path_mm_p95_per_slot': [float(np.nanpercentile(off[:, j], 95)) for j in range(HORIZON)],
-                'abs_timing_rows_per_slot': [float(np.nanmean(np.abs(tim[:, j]))) for j in range(HORIZON)],
-                'signed_timing_rows_per_slot': [float(np.nanmean(tim[:, j])) for j in range(HORIZON)]}
-    report = {'checkpoint': str(args.checkpoint.resolve()), 'stride': args.stride, 'steps': args.steps, 'window_rows': WINDOW_ROWS,
+                'total_mm_per_slot': [float(np.nanmean(total[:, j])) for j in range(horizon)],
+                'off_path_mm_per_slot': [float(np.nanmean(off[:, j])) for j in range(horizon)],
+                'off_path_mm_p95_per_slot': [float(np.nanpercentile(off[:, j], 95)) for j in range(horizon)],
+                'abs_timing_rows_per_slot': [float(np.nanmean(np.abs(tim[:, j]))) for j in range(horizon)],
+                'signed_timing_rows_per_slot': [float(np.nanmean(tim[:, j])) for j in range(horizon)]}
+    report = {'checkpoint': str(args.checkpoint.resolve()), 'stride': args.stride, 'steps': args.steps, 'horizon': horizon, 'window_rows': window_rows,
               'definition': 'off_path = distance to the nearest point of the commanded reference trajectory that followed the observation; '
                             'timing_rows = position of that nearest point along the trajectory minus the label row, in 30 Hz rows',
               'all': table(records), 'stationary': table([r for r in records if r['stationary']]),
@@ -122,9 +123,10 @@ def main():
     for name in ('all', 'stationary', 'moving'):
         t = report[name]
         if t['samples']:
-            print(name, t['samples'], 'rows | slot 1/4/8/16 total', [round(t['total_mm_per_slot'][j], 2) for j in (0, 3, 7, 15)],
-                  '| off-path', [round(t['off_path_mm_per_slot'][j], 2) for j in (0, 3, 7, 15)],
-                  '| |timing| rows', [round(t['abs_timing_rows_per_slot'][j], 1) for j in (0, 3, 7, 15)])
+            shown = [j for j in (0, 3, 7, 15, 31) if j < horizon]
+            print(name, t['samples'], 'rows | slot', [j + 1 for j in shown], 'total', [round(t['total_mm_per_slot'][j], 2) for j in shown],
+                  '| off-path', [round(t['off_path_mm_per_slot'][j], 2) for j in shown],
+                  '| |timing| rows', [round(t['abs_timing_rows_per_slot'][j], 1) for j in shown])
 
 
 if __name__ == '__main__':
