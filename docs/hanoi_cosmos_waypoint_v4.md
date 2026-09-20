@@ -1,5 +1,9 @@
 # Cosmos Hanoi training on waypoint_v4 labels
 
+> **September 20, 2026 update.** On the arm (September 18) this waypoint policy moved further off a column when it started a few
+> millimetres off it, because every training pose sat within 1 mm of 18 points. The dense retraining that replaces it is in
+> [hanoi_cosmos_dense_v5.md](hanoi_cosmos_dense_v5.md).
+
 Run `hanoi_cosmos_waypoint_v4_20260917`, Slurm job 17929493, submitted
 September 17, 2026, 18:25 EDT, completed September 18, 01:08 EDT. The joint_v3 run (`hanoi_cosmos_joint_sparse_20260917`,
 job 17904589) was cancelled at step 17,710 on September 17, 19:21 EDT, to free
