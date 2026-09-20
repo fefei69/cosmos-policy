@@ -133,9 +133,13 @@ class WaypointPolicyServer:
     """One policy, any number of sequential clients; inference runs on the event-loop thread."""
 
     def __init__(self, policy, metadata: dict, *, host: str = "127.0.0.1", port: int = 8001, seed: int = 1,
-                 dream: bool = False):
+                 dream: bool = False, validate_observation=None, validate_reply=None, name: str = "Hanoi waypoint policy"):
         self.policy = policy
         self.dream = dream
+        # Request/reply validators; the dense server supplies its own contract's.
+        self._validate_observation = validate_observation or globals()["validate_observation"]
+        self._validate_reply = validate_reply or globals()["validate_reply"]
+        self.name = name
         self.metadata = metadata
         self.host, self.port, self.seed = host, port, seed
         self.bound_port = None
@@ -165,7 +169,7 @@ class WaypointPolicyServer:
             sockets = getattr(server, "sockets", None) or server.server.sockets
             self.bound_port = sockets[0].getsockname()[1]
             self.ready.set()
-            logging.info("Serving Hanoi waypoint policy on ws://%s:%d", self.host, self.bound_port)
+            logging.info("Serving %s on ws://%s:%d", self.name, self.host, self.bound_port)
             await server.serve_forever()
 
     def stop(self) -> None:
@@ -187,9 +191,9 @@ class WaypointPolicyServer:
                 return
             started = time.monotonic()
             try:
-                observation = validate_observation(unpackb(message))
+                observation = self._validate_observation(unpackb(message))
                 infer_started = time.monotonic()
-                reply = validate_reply(self.policy.infer(observation, seed=self.seed, **({"dream": True} if self.dream else {})))
+                reply = self._validate_reply(self.policy.infer(observation, seed=self.seed, **({"dream": True} if self.dream else {})))
                 reply["server_timing"] = {"infer_ms": (time.monotonic() - infer_started) * 1000}
                 if previous_total is not None:
                     reply["server_timing"]["prev_total_ms"] = previous_total * 1000
