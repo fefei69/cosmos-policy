@@ -212,6 +212,7 @@ def test_selection_rule_and_metrics():
     m = per_sample_metrics(predicted, target, pad, current_jaw=0.0)
     assert m['slot1_mm'] == pytest.approx(2.0) and m['true_flip_slot'] == 8 and m['predicted_flip_slot'] == 9
     assert flip_slot(np.array([0, 0, 0]), 0) == -1
+    assert per_sample_metrics(target, target, np.ones(HORIZON, bool), 0.0) is None  # all slots padded: no score
     m.update({'target_jaw': target[:, 3], 'stationary': False, 'value_abs_error': 0.1, 'future_l1': None, 'future_psnr_db': None})
     s = summarize([m])
     assert s['jaw']['flip_timing_rows_median'] == FRAMESKIP and s['xyz_mm']['slot1_mean'] == pytest.approx(2.0)

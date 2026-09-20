@@ -45,6 +45,8 @@ def flip_slot(jaw_sequence, current):
 def per_sample_metrics(predicted, target, pad, current_jaw):
     """predicted/target (16, 4) absolute; pad (16,) bool; current_jaw 0/1 at the observation row."""
     valid = ~pad
+    if not valid.any():
+        return None  # Observation within the last three rows of its episode: no unpadded slot to score.
     errors = np.linalg.norm(predicted[:, :3] - target[:, :3], axis=1) * 1000
     last = int(np.flatnonzero(valid)[-1])
     jaw_correct = predicted[:, 3] == target[:, 3]
@@ -147,6 +149,7 @@ def main():
     def batched_pass(steps, decode_future):
         loader = DataLoader(Subset(dataset, selected.tolist()), batch_size=args.batch_size, num_workers=4, pin_memory=True)
         samples, offset = [], 0
+        skipped_all_padded = []
         with torch.no_grad():
             for b, batch in enumerate(loader):
                 n = int(batch['video'].shape[0])
@@ -185,6 +188,9 @@ def main():
                     predicted = threshold_jaw(actions[k])
                     target = arrays['actions'][i]
                     metric = per_sample_metrics(predicted, target, arrays['actions_is_pad'][i], float(current_jaw[offset + k]))
+                    if metric is None:
+                        skipped_all_padded.append(i)
+                        continue
                     metric.update({'archive_index': i, 'episode': int(arrays['episode_indices'][i]),
                                    'row': int(arrays['source_observation_indices'][i]), 'stationary': bool(arrays['stationary'][i]),
                                    'target_jaw': target[:, 3], 'predicted_slot1': predicted[0].tolist(),
@@ -195,6 +201,7 @@ def main():
                 offset += n
                 if (b + 1) % 50 == 0:
                     print(f'batch {b + 1}/{len(loader)}', flush=True)
+        report.setdefault('all_padded_chunks_skipped', len(skipped_all_padded))
         return samples
 
     def tables(samples):
@@ -216,6 +223,8 @@ def main():
         by_index = {s['archive_index']: s for s in primary}
         with torch.no_grad():
             for i in parity_rows:
+                if int(i) not in by_index:
+                    continue  # all-padded chunk, not scored
                 sample = dataset.raw_example(int(i))
                 served = predict_dense_actions(cfg, model, stats, sample['image'], sample['state'], seed=1)
                 item = dataset[int(i)]
