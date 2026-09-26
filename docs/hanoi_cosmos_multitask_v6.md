@@ -132,16 +132,18 @@ Reported by the evaluator with `--probe-rows`, on the selected export only:
   same prompt. Sensitivity only, since a reversed prompt has no unique correct
   chunk from an arbitrary mid-episode pose.
 
-## Runs (submitted September 26, 18:22 EDT)
+## Runs (submitted September 26, 18:30 EDT)
 
 Two runs of the same recipe, differing only in initial weights; the probe
 decides which to deploy. Each needs up to three 12-hour allocations; the
-continuations are chained with `--dependency=afterany`.
+continuations are chained with `--dependency=afterany`. A first submission
+(18606824, 18606827) failed at start on a metadata key in the launcher's
+identity (fixed in 1f43ed6) before writing anything; these are the reruns.
 
 | Run | Initial weights | Jobs |
 |---|---|---|
-| `hanoi_cosmos_multitask_20260926_video_init` | Cosmos-Predict2 2B video base (`fbc4f05d...`) | 18606824, 18606825, 18606826 |
-| `hanoi_cosmos_multitask_20260926_libero_init` | LIBERO policy checkpoint (has learned action selection from language on LIBERO-Goal) | 18606827, 18606828, 18606829 |
+| `hanoi_cosmos_multitask_20260926_video_init` | Cosmos-Predict2 2B video base (`fbc4f05d...`) | 18606947, 18606948, 18606949 |
+| `hanoi_cosmos_multitask_20260926_libero_init` | LIBERO policy checkpoint (has learned action selection from language on LIBERO-Goal) | 18606952, 18606953, 18606954 |
 
 Results are appended here as they arrive. Nothing here is a hardware result.
 The hardware client must send the task prompt with every request.
