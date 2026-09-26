@@ -103,7 +103,8 @@ def main():
     print(f'Hashing initial weights {initial.name}...', flush=True)
     identity = {'contract': CONTRACT, 'horizon': HORIZON, 'metadata_sha256': sha256(metadata / 'metadata.json'),
                 'prompts': [t.prompt for t in TASKS], 'embeddings_sha256': sha256(embeddings),
-                'statistics_sha256': prepared['statistics_sha256'], 'raw_sha256': prepared['raw_sha256'],
+                'statistics_sha256': prepared['statistics_sha256'],
+                'raw_sha256': {f['direction']: f['sha256'] for f in prepared['files']},  # one recording per task
                 'initial_weights': str(initial), 'initial_weights_sha256': sha256(initial), 'initial_weights_format': init['format'],
                 'run_label': init['run'], 'effective_batch_size': 32,
                 'microbatch': microbatch_from_env(), 'activation_checkpoint': os.environ['HANOI_DENSE_ACTIVATION_CHECKPOINT'],
