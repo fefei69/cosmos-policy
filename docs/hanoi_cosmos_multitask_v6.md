@@ -134,16 +134,19 @@ Reported by the evaluator with `--probe-rows`, on the selected export only:
 
 ## Runs (submitted September 26, 18:30 EDT)
 
-Two runs of the same recipe, differing only in initial weights; the probe
-decides which to deploy. Each needs up to three 12-hour allocations; the
+One run from the video base; a LIBERO-init hedge was started and then
+cancelled by the user, since the video-base init had already been shown to
+work on this task. Each needs up to three 12-hour allocations; the
 continuations are chained with `--dependency=afterany`. A first submission
 (18606824, 18606827) failed at start on a metadata key in the launcher's
-identity (fixed in 1f43ed6) before writing anything; these are the reruns.
+identity (fixed in 1f43ed6), and a second (18606947, 18606952) at the first
+training step because the environment script's two-prompt embedding cache was
+picked up (fixed in 81a7329); neither wrote a checkpoint.
 
 | Run | Initial weights | Jobs |
 |---|---|---|
-| `hanoi_cosmos_multitask_20260926_video_init` | Cosmos-Predict2 2B video base (`fbc4f05d...`) | 18606947, 18606948, 18606949 |
-| `hanoi_cosmos_multitask_20260926_libero_init` | LIBERO policy checkpoint (has learned action selection from language on LIBERO-Goal) | 18606952, 18606953, 18606954 |
+| `hanoi_cosmos_multitask_20260926_video_init` | Cosmos-Predict2 2B video base (`fbc4f05d...`) | 18607185, 18607186, 18607188 |
+| `hanoi_cosmos_multitask_20260926_libero_init` | LIBERO policy checkpoint | 18607189 (cancelled by the user at 18:55 after qualification: the video-base init had already been shown to work; run directory removed) |
 
 Results are appended here as they arrive. Nothing here is a hardware result.
 The hardware client must send the task prompt with every request.
