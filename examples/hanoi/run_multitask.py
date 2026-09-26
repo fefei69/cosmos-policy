@@ -73,7 +73,7 @@ def main():
         raise ValueError('Use a distinct hanoi_cosmos_multitask_* run name')
     root = Path(__file__).resolve().parents[2]
     metadata = Path(os.environ.get('HANOI_MULTITASK_METADATA', str(root / DEFAULT_METADATA))).resolve()
-    embeddings = Path(os.environ.get('HANOI_T5_EMBEDDINGS', str(root / DEFAULT_EMBEDDINGS))).resolve()
+    embeddings = Path(os.environ.get('HANOI_MULTITASK_EMBEDDINGS', str(root / DEFAULT_EMBEDDINGS))).resolve()
     prepared = json.loads((metadata / 'metadata.json').read_text())
     if prepared['contract'] != CONTRACT:
         raise ValueError('Wrong prepared task')
@@ -83,6 +83,12 @@ def main():
         raise ValueError('Prepared prompts differ from the task table in code')
     if not embeddings.is_file():
         raise FileNotFoundError(f'Prompt embedding cache is missing: {embeddings}')
+    import pickle
+    with embeddings.open('rb') as stream:
+        cached = set(pickle.load(stream))
+    absent = [t.direction for t in TASKS if t.prompt not in cached]
+    if absent:
+        raise ValueError(f'Embedding cache {embeddings} lacks the prompts of {absent}; encode with prepare_t5.py --prompt-set multitask')
     initial = Path(os.environ.get('HANOI_INIT_CHECKPOINT', str(root / init['default_path']))).resolve()
     if not initial.is_file():
         raise FileNotFoundError(f'Initial weights for run {init["run"]} ({args.init}) are missing: {initial}')
@@ -95,7 +101,7 @@ def main():
     lock = (run / 'pipeline.lock').open('a')
     fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
     os.environ.update(COSMOS_POLICY_PLATFORM='hanoi_dense', HANOI_MULTITASK_RUN_NAME=run_name, HANOI_MULTITASK_METADATA=str(metadata),
-                      HANOI_T5_EMBEDDINGS=str(embeddings), HANOI_INIT_CHECKPOINT=str(initial), HANOI_INIT_FORMAT=init['format'])
+                      HANOI_MULTITASK_EMBEDDINGS=str(embeddings), HANOI_INIT_CHECKPOINT=str(initial), HANOI_INIT_FORMAT=init['format'])
     os.environ.pop('HANOI_CONTINUATION_ANCHOR', None)
     os.environ.pop('HANOI_TRAINING_SCHEDULE', None)
     os.environ.setdefault('HANOI_DENSE_MICROBATCH', '16')

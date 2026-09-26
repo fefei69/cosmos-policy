@@ -34,6 +34,12 @@ VALIDATION_EVERY = 500
 EXPERIMENT = 'cosmos_predict2_2b_hanoi_multitask'
 
 
+def embeddings_path(root):
+    """The six-prompt cache. HANOI_T5_EMBEDDINGS is deliberately ignored: examples/hanoi/env.sh exports it for the
+    single-direction pipelines and it names the two-prompt cache, which lacks the multitask prompts."""
+    return os.environ.get('HANOI_MULTITASK_EMBEDDINGS', str(root / DEFAULT_EMBEDDINGS))
+
+
 def make_config():
     if os.environ.get('COSMOS_POLICY_PLATFORM') != 'hanoi_dense':
         raise ValueError('This experiment requires COSMOS_POLICY_PLATFORM=hanoi_dense (chunk 16 x 4, state 7)')
@@ -42,7 +48,7 @@ def make_config():
     c = base_config()
     root = Path(__file__).resolve().parents[2]
     metadata = os.environ.get('HANOI_MULTITASK_METADATA', str(root / DEFAULT_METADATA))
-    embeddings = os.environ.get('HANOI_T5_EMBEDDINGS', str(root / DEFAULT_EMBEDDINGS))
+    embeddings = embeddings_path(root)
     prepared = Path(metadata) / 'metadata.json'
     if prepared.exists():  # Training always has the prepared dataset; a deployment host loading an export may not.
         from cosmos_policy.constants import NUM_ACTIONS_CHUNK
