@@ -148,5 +148,102 @@ picked up (fixed in 81a7329); neither wrote a checkpoint.
 | `hanoi_cosmos_multitask_20260926_video_init` | Cosmos-Predict2 2B video base (`fbc4f05d...`) | 18607185, 18607186, 18607188 |
 | `hanoi_cosmos_multitask_20260926_libero_init` | LIBERO policy checkpoint | 18607189 (cancelled by the user at 18:55 after qualification: the video-base init had already been shown to work; run directory removed) |
 
-Results are appended here as they arrive. Nothing here is a hardware result.
-The hardware client must send the task prompt with every request.
+## Results (video-base init, completed September 27, 19:30 EDT)
+
+Training: 32,000 updates at 2.15 s each across three allocations (18607185
+stopped at its budget in stage 12, 18607186 in stage 16, 18607188 finished
+the last updates and the final passes; both handovers resumed cleanly).
+About 25 hours of wall time including the 16 stage evaluations.
+
+Per-export validation (every ninth row, about 5,100 rows over the six
+held-out episodes, 5 denoising steps; the last column is the spread of the
+six per-task slot-1 means):
+
+| Updates | Slot-1 mm (all / stationary / moving) | Mean over slots | Endpoint | Jaw acc. | Per-task slot-1 |
+|---|---|---|---|---|---|
+| 2,000 | 14.14 / 14.53 / 14.06 | 22.72 | 35.96 | 0.9722 | 14.02 to 14.52 |
+| 4,000 | 4.77 / 3.83 / 4.99 | 10.73 | 16.54 | 0.9927 | 4.50 to 5.03 |
+| 6,000 | 2.87 / 2.70 / 2.91 | 5.16 | 7.25 | 0.9961 | 2.81 to 3.01 |
+| 8,000 | 2.25 / 1.92 / 2.32 | 4.47 | 6.46 | 0.9961 | 2.19 to 2.35 |
+| 10,000 | 2.07 / 1.64 / 2.18 | 4.60 | 6.22 | 0.9968 | 2.01 to 2.12 |
+| 12,000 | 1.42 / 1.15 / 1.48 | 3.58 | 5.16 | 0.9978 | 1.35 to 1.47 |
+| 14,000 | 1.76 / 1.36 / 1.85 | 3.74 | 4.99 | 0.9974 | 1.71 to 1.80 |
+| 16,000 | 1.97 / 2.05 / 1.95 | 3.98 | 5.64 | 0.9981 | 1.90 to 2.08 |
+| 18,000 | 1.65 / 1.58 / 1.67 | 3.45 | 4.66 | 0.9985 | 1.62 to 1.67 |
+| 20,000 | 1.21 / 1.10 / 1.23 | 3.17 | 4.45 | 0.9986 | 1.16 to 1.24 |
+| 22,000 | 1.10 / 1.02 / 1.12 | 2.83 | 4.11 | 0.9984 | 1.08 to 1.11 |
+| 24,000 | 1.01 / 1.02 / 1.01 | 2.73 | 3.92 | 0.9990 | 0.97 to 1.05 |
+| 26,000 | 1.00 / 0.93 / 1.01 | 2.61 | 3.86 | 0.9991 | 0.98 to 1.01 |
+| 28,000 | 0.82 / 0.80 / 0.82 | 2.48 | 3.74 | 0.9991 | 0.79 to 0.83 |
+| 30,000 | 0.87 / 0.80 / 0.88 | 2.55 | 3.87 | 0.9991 | 0.81 to 0.91 |
+| 32,000 | 0.81 / 0.77 / 0.82 | 2.27 | 3.46 | 0.9993 | 0.78 to 0.83 |
+
+The six tasks never separate by more than 0.5 mm at any stage. Against the
+single-task run at equal update counts, the six-task model is behind by about
+0.6 mm at 8,000 and ahead from 22,000 on (1.10 against 1.33 mm at 22,000).
+
+Selection (decision 11 over all tasks): step 32,000, `exports/iter_000032000.pt`,
+SHA-256 `6521a05937ee906384ec7afe677212ab429516cc10f4944c0d8c72921624cca0`.
+
+Full validation (every third row, 15,264 scored, 5 all-padded rows skipped):
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Flips predicted |
+|---|---|---|---|---|---|---|---|
+| All | 15,264 | 0.79 / 0.62 / 1.87 mm | 95.9% | 2.31 mm | 3.59 mm | 0.9993 | 2,786 of 2,792 |
+| Stationary | 2,775 | 0.72 / 0.53 / 1.86 mm | 95.9% | 4.79 mm | 8.91 mm | 0.9998 | 41 of 41 |
+| Moving | 12,489 | 0.80 / 0.65 / 1.88 mm | 95.9% | 1.76 mm | 2.40 mm | 0.9992 | 2,745 of 2,751 |
+
+Per task slot-1: 0.79, 0.79, 0.80, 0.79, 0.79, 0.77 mm (task order as in the
+table above). Ten denoising steps change nothing (0.79 / 2.32). Future frame
+PSNR 32.1 dB, value error 0.003. Serving parity on 200 observations with
+their own prompts: max first-slot difference 0.064 mm, mean 0.029 mm, passed.
+
+Test split (locked after selection; every third row, 15,179 scored, 6
+all-padded rows skipped):
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Balanced | Flips predicted | Flip timing |
+|---|---|---|---|---|---|---|---|---|---|
+| All | 15,179 | 0.80 / 0.62 / 1.93 mm | 95.6% | 2.30 mm | 3.56 mm | 0.9993 | 0.9993 | 2,792 of 2,795 | median 0, p95 3 rows |
+| Stationary | 2,678 | 0.73 / 0.53 / 1.91 mm | 95.6% | 4.63 mm | 8.77 mm | 0.9998 | 0.9998 | 34 of 34 | median 0, p95 3 rows |
+| Moving | 12,501 | 0.81 / 0.64 / 1.93 mm | 95.6% | 1.80 mm | 2.44 mm | 0.9992 | 0.9992 | 2,758 of 2,761 | median 0, p95 3 rows |
+
+Per task on test (slot-1 / mean over slots / jaw): A to C 0.80 / 2.34 /
+0.9994; C to A 0.79 / 2.28 / 0.9994; A to B 0.79 / 2.27 / 0.9990; B to A
+0.80 / 2.24 / 0.9993; B to C 0.80 / 2.39 / 0.9993; C to B 0.80 / 2.28 /
+0.9993. No validation-to-test gap. Each task's figures rest on one episode.
+
+### Language-following probe
+
+| Split | Decision accuracy (chance 50%) | Rows | Per direction of each pair | Swap displacement | Reverse-prompt shift vs same-prompt redraw |
+|---|---|---|---|---|---|
+| validation | 97.8% | 339 | 0.93 to 1.00 | 16 to 38 mm | 38.3 mm vs 1.6 mm |
+| test | 96.7% | 333 | 0.88 to 1.00 | 17 to 35 mm | 29.0 mm vs 0.8 mm |
+
+The lowest entries are the B-start pair scored under the swapped prompt
+(0.88 and 0.91 on test, 32 and 45 rows), where the matched window is the
+short lift before the transit diverges. Swapping the prompt moves the
+predicted chunk by 16 to 38 mm on the same observation, an order of magnitude
+above the noise between two draws; the goal is taken from the prompt.
+
+### Against the single-task model (test split)
+
+| Model | Tasks | Updates | Slot-1 | Within 2 mm | Mean over slots | Jaw acc. |
+|---|---|---|---|---|---|---|
+| Run B, video init | 1 | 16,000 | 1.15 mm | 88.8% | 3.25 mm | 0.9994 |
+| Cycle 2 of run B (deployed before) | 1 | 32,000 | 0.81 mm | 95.6% | 2.84 mm | 0.9996 |
+| Six-task, video init | 6 | 32,000 | 0.80 mm | 95.6% | 2.30 mm | 0.9993 |
+
+Different recordings (the new set has slower motion with 0.5 to 2 mm lateral
+variation), so the comparison is indicative, not controlled. Ready-to-deploy
+criteria (guide section 7) all met offline. Nothing here is a hardware
+result. The hardware client must send the task prompt with every request.
+
+### Cycle 2 (in progress)
+
+At the user's request (September 27, 01:45), a second cycle
+(`hanoi_cosmos_multitask_20260926_video_init_cycle2`, jobs 18626782,
+18626783, 18626784) continues from the step-32,000 export with a fresh
+optimizer and the same schedule for 32,000 more updates, exporting every
+2,000; the best export across both cycles is chosen afterwards on the same
+validation rows. Its `run_notes.json` records the starting point. The
+first-cycle export above is deployable as it stands.
