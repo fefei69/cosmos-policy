@@ -6,6 +6,7 @@ policy is re-run with the future-frame decode enabled. The dream is the frame th
 
 * ``dreams.mp4``          [live input | dreamed 1.6 s ahead] per inference, at the run's inference rate
 * ``dream_strips/NNNNNN.png``  [live now | dream | live 1.6 s later | difference]
+* ``dream_frames/NNNNNN.png``  the bare dream frame per inference
 * ``dreams_contact.png``  every ``--contact-every``-th pair on one sheet
 * ``dream_report.json``   per inference: offline vs live first row (mm), value, image metrics
 
@@ -80,6 +81,8 @@ def main():
     args.output.mkdir(parents=True, exist_ok=True)
     strips_dir = args.output / 'dream_strips'
     strips_dir.mkdir(exist_ok=True)
+    frames_dir = args.output / 'dream_frames'
+    frames_dir.mkdir(exist_ok=True)
     encoder = subprocess.Popen(
         ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', '696x366',
          '-r', f'{rate:.4f}', '-i', '-', '-c:v', 'libx264', '-preset', 'fast', '-crf', '20', '-pix_fmt', 'yuv420p',
@@ -111,6 +114,7 @@ def main():
                                 [f'live t={t:.1f}s (req {i})', f'dream +{AHEAD_S:.1f}s  v={value:.2f}',
                                  f'live +{AHEAD_S:.1f}s (req {later_id})' if later is not None else 'n/a', '|diff|'])
             Image.fromarray(strip).save(strips_dir / f'{i:06d}.png')
+            Image.fromarray(dream).save(frames_dir / f'{i:06d}.png')
             pair = np.concatenate([image, dream], axis=1)
             panel = Image.fromarray(pair).resize((696, 348), Image.NEAREST)
             canvas = Image.new('RGB', (696, 366), (20, 20, 20))

@@ -342,6 +342,13 @@ OpenPI WebSocket protocol on port 8001 and driven by the OpenPI dense client
 cluster agent's HTTP server (`serve_hanoi_dense.py`) is not used on the arm.
 Replay: slot-1 0.69 mm, 0.5 s inference, no brakes. Not yet run live.
 
+Six tasks (September 28): `serve_dense --multitask` serves the six-task export
+(`hanoi_cosmos_multitask_20260926_video_init/exports/iter_000032000.pt`, contract
+six, prompt required on every request) under the `hanoi_multitask` identity; the
+OpenPI dense client picks the task with `--task` and starts above its start peg.
+Cycle 2's `iter_000022000.pt` is on disk as an alternative. The cluster's
+transfer list was run from the OpenPI directory and its files were moved here.
+
 ## 8. World-model head check
 
 `examples/hanoi/predict_future_images.py` decodes the model's predicted future

@@ -1,4 +1,4 @@
-"""Serve a hanoi_dense_v5 export over the OpenPI WebSocket protocol for the dense client.
+"""Serve a hanoi_dense_v5 or hanoi_multitask_v6 export over the OpenPI WebSocket protocol for the dense client.
 
 Same framing as ``serve_waypoint`` (and the OpenPI dense server): metadata on connect, then one
 msgpack request per reply. The OpenPI client ``examples/hanoi/deployment/dense_client.py`` drives
@@ -6,7 +6,8 @@ the arm; it reads the chunk length and the execution prefix from the ``hanoi_den
 selects the export by ``config_name``. Run from the repository root in the Cosmos environment::
 
     source examples/hanoi/env.sh
-    .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001
+    .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001              # single-task dense
+    .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --multitask  # six tasks, prompt required
 
 Request: ``observation/image`` (224, 224, 3) uint8, ``observation/state`` (7,) joint angles and jaw
 stroke, optional ``prompt``. Reply: ``actions`` (H, 4) float32 absolute XYZ and binary jaw intent at
@@ -26,10 +27,15 @@ DEFAULT_RUN = Path("data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_dens
 DEFAULT_STATS = Path("data/hanoi_cosmos/dense_v5/dataset_statistics.json")
 DEFAULT_EMBEDDINGS = Path("data/hanoi_cosmos/t5_embeddings.pkl")
 CONFIG_NAME = "cosmos_hanoi_dense_v5_h{horizon}"
+MULTITASK_CONFIG_NAME = "cosmos_hanoi_multitask_v6_h{horizon}{cycle}"
+MULTITASK_CONTRACT = "hanoi_multitask_v6_cosmos_v1"
+DEFAULT_MULTITASK_RUN = Path("data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_multitask_20260926_video_init")
+DEFAULT_MULTITASK_STATS = Path("data/hanoi_cosmos/multitask_v6/dataset_statistics.json")
+DEFAULT_MULTITASK_EMBEDDINGS = Path("data/hanoi_cosmos/t5_embeddings_multitask.pkl")
 PROMPT = "Move all four rings from peg A to peg C following Tower of Hanoi rules."
 
 
-def validate_observation(observation: dict) -> dict:
+def validate_observation(observation: dict, prompts=(PROMPT,)) -> dict:
     if not isinstance(observation, dict):
         raise ValueError("Observation must be a mapping")
     try:
@@ -41,12 +47,13 @@ def validate_observation(observation: dict) -> dict:
         raise ValueError("observation/image must be the (224, 224, 3) uint8 contract crop")
     if state.shape != (7,) or not np.isfinite(state).all():
         raise ValueError("observation/state must be six joint angles (rad) and jaw stroke (m)")
-    prompt = observation.get("prompt", PROMPT)
+    prompt = observation.get("prompt", prompts[0] if len(prompts) == 1 else None)
     if isinstance(prompt, bytes):
         prompt = prompt.decode()
-    if prompt != PROMPT:
-        raise ValueError("This policy was trained for AAAA to CCCC only")
-    return {"observation/image": image, "observation/state": state, "prompt": PROMPT}
+    if prompt not in prompts:
+        raise ValueError("This policy was trained for AAAA to CCCC only" if len(prompts) == 1 else
+                         "A six-task request must carry one of the six trained prompts verbatim; there is no default task")
+    return {"observation/image": image, "observation/state": state, "prompt": prompt}
 
 
 def make_reply_validator(horizon: int, execution_prefix: int):
@@ -58,8 +65,13 @@ def make_reply_validator(horizon: int, execution_prefix: int):
             raise ValueError("Jaw intent must be thresholded to 0/1")
         if int(result.get("execution_prefix", execution_prefix)) != execution_prefix:
             raise ValueError("Policy changed the execution prefix")
-        return {"actions": actions, "reference_rate_hz": int(result.get("reference_rate_hz", 10)),
-                "execution_prefix": execution_prefix, "action_horizon": horizon}
+        reply = {"actions": actions, "reference_rate_hz": int(result.get("reference_rate_hz", 10)),
+                 "execution_prefix": execution_prefix, "action_horizon": horizon}
+        if "task" in result:  # six-task policy: echo the task the prompt resolved to, in the client's field names
+            reply["task_direction"] = str(result["task"])
+            reply["task"] = int(result.get("task_index", -1))
+            reply["goal_peg"] = str(result.get("goal_peg", ""))
+        return reply
     return validate_reply
 
 
@@ -85,9 +97,38 @@ def build_metadata(policy, *, seed: int, gpu: str) -> dict:
     return {"hanoi_dense": dense, "cosmos_hanoi": identity}
 
 
-def warm_up(policy, seed: int) -> float:
+def build_multitask_metadata(policy, *, seed: int, gpu: str, cycle: str) -> dict:
+    """The hanoi_multitask identity the OpenPI dense client checks: contract six with the task table and prompts."""
+    from cosmos_policy.datasets.hanoi_multitask_data import TASKS
+
+    identity = policy.identity["cosmos_hanoi"]
+    horizon = int(identity["action_horizon"])
+    contract = {**identity["contract"], "version": 6, "action_horizon": horizon, "joint_order": "trossen_arm_driver_arm_indices_0_to_5",
+                "conditioning": "instruction string only; one of six verbatim prompts is required on every request, no default task",
+                "tasks": [{"index": t.index, "direction": t.direction, "start_peg": t.start, "goal_peg": t.goal, "prompt": t.prompt} for t in TASKS]}
+    block = {
+        "model": "cosmos_multitask",
+        "config_name": MULTITASK_CONFIG_NAME.format(horizon=horizon, cycle=cycle),
+        "checkpoint": identity["checkpoint"],
+        "contract": contract,
+        "prompt": None,
+        "prompts": list(identity["prompts"]),
+        "export_sha256": identity["export_sha256"],
+        "normalization_sha256": identity["normalization_sha256"],
+        "embeddings_sha256": identity.get("embeddings_sha256"),
+        "num_steps": identity["num_steps"],
+        "seed": seed,
+        "sampling": "fixed seed per request",
+        "gpu": gpu,
+        "initial_weights_sha256": identity.get("initial_weights_sha256"),
+        "training_contract": identity.get("contract_name"),
+    }
+    return {"hanoi_multitask": block, "cosmos_hanoi": identity}
+
+
+def warm_up(policy, seed: int, prompt: str = PROMPT) -> float:
     observation = {"observation/image": np.zeros((224, 224, 3), np.uint8), "observation/state": np.zeros(7, np.float32),
-                   "prompt": PROMPT}
+                   "prompt": prompt}
     started = time.monotonic()
     policy.infer(observation, seed=seed)
     return time.monotonic() - started
@@ -95,9 +136,11 @@ def warm_up(policy, seed: int) -> float:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description=__doc__, formatter_class=argparse.RawDescriptionHelpFormatter)
-    parser.add_argument("--checkpoint", type=Path, default=DEFAULT_RUN / "exports/iter_000016000.pt")
-    parser.add_argument("--stats", type=Path, default=DEFAULT_STATS)
-    parser.add_argument("--embeddings", type=Path, default=DEFAULT_EMBEDDINGS)
+    parser.add_argument("--multitask", action="store_true",
+                        help="serve the six-task contract-six policy (defaults below switch to its export, stats and embeddings)")
+    parser.add_argument("--checkpoint", type=Path, default=None, help="default: the selected dense or six-task export")
+    parser.add_argument("--stats", type=Path, default=None)
+    parser.add_argument("--embeddings", type=Path, default=None)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8001)
     parser.add_argument("--seed", type=int, default=1)
@@ -105,8 +148,14 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
+    if args.checkpoint is None:
+        args.checkpoint = (DEFAULT_MULTITASK_RUN / "exports/iter_000032000.pt") if args.multitask else (DEFAULT_RUN / "exports/iter_000016000.pt")
     run = args.checkpoint.resolve().parent.parent  # run/exports/iter_*.pt
-    horizon = int(json.loads((run / "joint_contract.json").read_text()).get("horizon", 16))
+    run_identity = json.loads((run / "joint_contract.json").read_text())
+    multitask = args.multitask or run_identity.get("contract") == MULTITASK_CONTRACT
+    args.stats = args.stats or (DEFAULT_MULTITASK_STATS if multitask else DEFAULT_STATS)
+    args.embeddings = args.embeddings or (DEFAULT_MULTITASK_EMBEDDINGS if multitask else DEFAULT_EMBEDDINGS)
+    horizon = int(run_identity.get("horizon", 16))
     # Platform constants bind at import time; set them before any cosmos_policy import.
     os.environ["COSMOS_POLICY_PLATFORM"] = "hanoi_dense"
     os.environ["HANOI_DENSE_HORIZON"] = str(horizon)
@@ -118,19 +167,34 @@ def main() -> None:
 
     if not torch.cuda.is_available():
         raise RuntimeError("A CUDA GPU is required to serve the policy")
-    cfg = HanoiDenseInferenceConfig(str(args.checkpoint), str(args.stats), str(args.embeddings),
-                                    num_denoising_steps_action=args.denoising_steps, chunk_size=horizon)
-    logging.info("Loading %s (%d-step chunks)", args.checkpoint, horizon)
-    policy = HanoiDensePolicy(cfg)
-    metadata = build_metadata(policy, seed=args.seed, gpu=torch.cuda.get_device_name())
-    identity = metadata["hanoi_dense"]
+    if multitask:
+        from cosmos_policy.experiments.robot.hanoi.multitask_policy import HanoiMultitaskInferenceConfig, HanoiMultitaskPolicy
+
+        cfg = HanoiMultitaskInferenceConfig(str(args.checkpoint), str(args.stats), str(args.embeddings),
+                                            num_denoising_steps_action=args.denoising_steps, chunk_size=horizon)
+        logging.info("Loading six-task %s (%d-step chunks)", args.checkpoint, horizon)
+        policy = HanoiMultitaskPolicy(cfg)
+        cycle = "_cycle2" if "cycle2" in run.name else ""
+        metadata = build_multitask_metadata(policy, seed=args.seed, gpu=torch.cuda.get_device_name(), cycle=cycle)
+        identity = metadata["hanoi_multitask"]
+        prompts = tuple(identity["prompts"])
+    else:
+        cfg = HanoiDenseInferenceConfig(str(args.checkpoint), str(args.stats), str(args.embeddings),
+                                        num_denoising_steps_action=args.denoising_steps, chunk_size=horizon)
+        logging.info("Loading %s (%d-step chunks)", args.checkpoint, horizon)
+        policy = HanoiDensePolicy(cfg)
+        metadata = build_metadata(policy, seed=args.seed, gpu=torch.cuda.get_device_name())
+        identity = metadata["hanoi_dense"]
+        prompts = (PROMPT,)
     logging.info("Export SHA-256 %s, config %s", identity["export_sha256"], identity["config_name"])
-    logging.info("Warm-up inference took %.2f s", warm_up(policy, args.seed))
+    logging.info("Warm-up inference took %.2f s", warm_up(policy, args.seed, prompts[0]))
+    if len(prompts) > 1:
+        logging.info("Six-task server: every request must carry one of %d verbatim prompts", len(prompts))
     WaypointPolicyServer(
         policy, metadata, host=args.host, port=args.port, seed=args.seed,
-        validate_observation=validate_observation,
+        validate_observation=lambda observation: validate_observation(observation, prompts),
         validate_reply=make_reply_validator(horizon, int(identity["contract"]["execution_prefix"])),
-        name=f"Cosmos dense Hanoi policy ({horizon}-step chunks)",
+        name=f"Cosmos {'six-task' if multitask else 'dense'} Hanoi policy ({horizon}-step chunks)",
     ).serve_forever()
 
 
