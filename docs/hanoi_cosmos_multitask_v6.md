@@ -238,12 +238,88 @@ variation), so the comparison is indicative, not controlled. Ready-to-deploy
 criteria (guide section 7) all met offline. Nothing here is a hardware
 result. The hardware client must send the task prompt with every request.
 
-### Cycle 2 (in progress)
+## Results, cycle 2 (completed September 28, 21:03 EDT)
 
-At the user's request (September 27, 01:45), a second cycle
-(`hanoi_cosmos_multitask_20260926_video_init_cycle2`, jobs 18626782,
-18626783, 18626784) continues from the step-32,000 export with a fresh
-optimizer and the same schedule for 32,000 more updates, exporting every
-2,000; the best export across both cycles is chosen afterwards on the same
-validation rows. Its `run_notes.json` records the starting point. The
-first-cycle export above is deployable as it stands.
+At the user's request (September 27, 01:45: keep training beyond the planned
+budget and pick the best export afterwards), a second cycle
+(`hanoi_cosmos_multitask_20260926_video_init_cycle2`, jobs 18626782, 18626783,
+18626784) continued from the first cycle's step-32,000 export with a fresh
+optimizer and the same schedule shape for 32,000 more updates. `run_notes.json`
+records the starting point (the identity's `run_label` reads L because the
+export was passed through `HANOI_INIT_CHECKPOINT`). Two allocation handovers
+resumed cleanly; the second allocation ran to its time limit inside the full
+validation pass, which the third redid from the start.
+
+Per-export validation (every ninth row, 5 denoising steps; cycle-2 step, with
+the total update count in parentheses):
+
+| Step (total) | Slot-1 mm (all / stationary / moving) | Mean over slots | Endpoint | Jaw acc. | Per-task slot-1 |
+|---|---|---|---|---|---|
+| 2,000 (34,000) | 1.35 / 1.33 / 1.35 | 3.21 | 4.74 | 0.9986 | 1.28 to 1.38 |
+| 4,000 (36,000) | 1.52 / 1.42 / 1.55 | 3.13 | 4.28 | 0.9984 | 1.51 to 1.54 |
+| 6,000 (38,000) | 1.52 / 1.47 / 1.53 | 3.24 | 4.62 | 0.9987 | 1.47 to 1.54 |
+| 8,000 (40,000) | 1.20 / 0.98 / 1.26 | 2.82 | 4.03 | 0.9986 | 1.14 to 1.25 |
+| 10,000 (42,000) | 1.14 / 0.88 / 1.19 | 2.85 | 4.18 | 0.9988 | 1.10 to 1.18 |
+| 12,000 (44,000) | 0.94 / 0.84 / 0.96 | 2.64 | 4.09 | 0.9987 | 0.91 to 0.97 |
+| 14,000 (46,000) | 1.06 / 0.83 / 1.11 | 2.66 | 3.80 | 0.9991 | 1.02 to 1.12 |
+| 16,000 (48,000) | 0.99 / 0.97 / 0.99 | 2.69 | 3.80 | 0.9991 | 0.97 to 1.02 |
+| 18,000 (50,000) | 1.00 / 1.01 / 0.99 | 2.58 | 3.76 | 0.9989 | 0.97 to 1.02 |
+| 20,000 (52,000) | 1.03 / 0.81 / 1.08 | 2.39 | 3.47 | 0.9992 | 1.00 to 1.07 |
+| 22,000 (54,000) | 0.75 / 0.70 / 0.76 | 2.24 | 3.32 | 0.9991 | 0.74 to 0.77 |
+| 24,000 (56,000) | 0.79 / 0.84 / 0.77 | 2.28 | 3.36 | 0.9992 | 0.77 to 0.81 |
+| 26,000 (58,000) | 0.70 / 0.72 / 0.69 | 1.97 | 2.96 | 0.9992 | 0.68 to 0.71 |
+| 28,000 (60,000) | 0.64 / 0.63 / 0.64 | 2.16 | 3.33 | 0.9993 | 0.63 to 0.66 |
+| 30,000 (62,000) | 0.68 / 0.63 / 0.69 | 1.99 | 3.14 | 0.9993 | 0.64 to 0.72 |
+| 32,000 (64,000) | 0.61 / 0.58 / 0.62 | 1.87 | 2.92 | 0.9995 | 0.60 to 0.63 |
+
+The restarted schedule cost about 0.7 mm at first and only overtook the
+first cycle's endpoint (0.81 / 2.27) from 54,000 updates on; the last three
+stages then improved steadily. Selection (decision 11): cycle-2 step 32,000
+(64,000 updates in total), `exports/iter_000032000.pt` of the cycle-2 run,
+SHA-256 `576dd453fd3a2e77879ed463a97177cf08d5618eb89967a726b27f8220c5b6fc`.
+
+Full validation (every third row, 15,264 scored):
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Flips predicted |
+|---|---|---|---|---|---|---|---|
+| All | 15,264 | 0.60 / 0.47 / 1.45 mm | 98.2% | 1.91 mm | 3.04 mm | 0.9995 | 2,787 of 2,792 |
+| Stationary | 2,775 | 0.55 / 0.35 / 1.67 mm | 97.3% | 4.46 mm | 8.21 mm | 0.9998 | 41 of 41 |
+| Moving | 12,489 | 0.61 / 0.50 / 1.41 mm | 98.4% | 1.34 mm | 1.89 mm | 0.9994 | 2,746 of 2,751 |
+
+Per task slot-1 0.58 to 0.61 mm. Ten steps change nothing (0.60 / 1.92).
+Future frame PSNR 32.5 dB, value error 0.002. Serving parity on 200
+observations: max 0.090 mm, mean 0.028 mm, passed.
+
+Test split (locked after selection; every third row, 15,179 scored, 6
+all-padded rows skipped):
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Balanced | Flips predicted | Flip timing |
+|---|---|---|---|---|---|---|---|---|---|
+| All | 15,179 | 0.60 / 0.48 / 1.48 mm | 98.0% | 1.90 mm | 3.01 mm | 0.9995 | 0.9995 | 2,791 of 2,795 | median 0, p95 0 rows |
+| Stationary | 2,678 | 0.56 / 0.36 / 1.70 mm | 96.7% | 4.42 mm | 8.26 mm | 0.9999 | 0.9999 | 34 of 34 | median 0, p95 3 rows |
+| Moving | 12,501 | 0.61 / 0.50 / 1.45 mm | 98.2% | 1.36 mm | 1.88 mm | 0.9994 | 0.9994 | 2,757 of 2,761 | median 0, p95 0 rows |
+
+Per task on test (slot-1 / mean over slots / jaw): A to C 0.60 / 1.93 /
+0.9996; C to A 0.61 / 1.88 / 0.9995; A to B 0.60 / 1.87 / 0.9993; B to A
+0.60 / 1.89 / 0.9995; B to C 0.60 / 1.94 / 0.9993; C to B 0.61 / 1.90 /
+0.9996. No validation-to-test gap.
+
+Language probe: decision accuracy 98.0% on validation (339 rows) and 97.0% on
+test (333 rows), per direction 0.88 to 1.00; prompt swaps move the chunk by
+16 to 38 mm and the reverse prompt by 35 to 42 mm, against 1.4 mm between
+two draws under the same prompt.
+
+### Both cycles side by side (test split)
+
+| Export | Updates | Slot-1 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Probe |
+|---|---|---|---|---|---|---|---|
+| Cycle 1, step 32,000 | 32,000 | 0.80 mm | 95.6% | 2.30 mm | 3.56 mm | 0.9993 | 96.7% |
+| **Cycle 2, step 32,000** | **64,000** | **0.60 mm** | **98.0%** | **1.90 mm** | **3.01 mm** | **0.9995** | **97.0%** |
+| Single-task cycle 2 (deployed before) | 32,000 | 0.81 mm | 95.6% | 2.84 mm | 4.73 mm | 0.9996 | n/a |
+
+The second cycle cut first-pose error by a quarter and chunk error by 17%
+with a tighter p95 and no loss of language following. The cycle-2 export is
+the one to deploy; `docs/hanoi_multitask_v6_cosmos_transfer.txt` points at it
+and `docs/hanoi_multitask_v6_cosmos_transfer_both.txt` carries both cycles'
+selected exports. Ready-to-deploy criteria all met offline. Nothing here is a
+hardware result.
