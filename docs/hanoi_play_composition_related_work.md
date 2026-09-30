@@ -688,9 +688,12 @@ render, or a same-episode frame; and will the VLA be handed that identical
 frame at both training-goal sampling and evaluation? The goal-frame rule in
 6.2 cannot be fixed until this is answered.
 
-### 6.10 Labeling rules for the play data (final)
+### 6.10 Labeling rules for the play data (final, language-conditioned)
 
-Written September 30, 2026, after a second verification pass. Precedent
+Written September 30, 2026, after a second verification pass; revised the
+same day when the user decided the VLA is conditioned on language only, no
+goal image. Rules 3 to 5 changed accordingly; the measured statistics and
+rules 1, 2, 6, 7 and 8 stand. Precedent
 rules checked at the source: OGBench GCBC samples the goal uniformly over the
 future states of the same trajectory, k ~ Unif(min(t+1, T-1), T-1), with no
 filtering or reweighting of (state, action, goal) triples; GCSL uses every
@@ -739,17 +742,47 @@ Rules, one per training row t:
    every later move of the walk; the goal board is the board after move j.
    Lateral and regress labels are kept; no filtering, no reweighting. The
    snap to move ends is the one deviation from row-level uniform sampling,
-   disclosed.
-4. Goal pixels. The settled frame (the last non-stale row of a move, retreat
-   stage) of a uniformly random recorded occurrence of the goal board
-   anywhere in the training walks, not necessarily the same walk. The arm
-   never returns home, so a same-walk goal frame shows the arm over the
-   segment's last target peg, a goal-only shortcut. Two probes to publish:
-   the board is readable from settled frames with the arm over each peg, and
-   the next target peg cannot be predicted from the goal frame alone (chance).
-5. Execution control. The same goal-image VLA handed the planner's next-board
-   settled frame at test, with the same cut-and-hold semantics, so both sides
-   consume the same sub-goal privilege.
+   disclosed. This is hindsight relabelling in the LangLfP and CALVIN sense,
+   with a templated sentence instead of a human or a task detector.
+4. Goal sentence. The goal board is put into words with one fixed template
+   over all 81 boards, rings numbered from the smallest, one sentence per
+   board, served as cached T5 embeddings exactly as the six-task run serves
+   its six prompts (prompt required verbatim, no default, no text encoder at
+   inference). The six tower tasks are the six full-stack instances of the
+   same template, so the test prompt is a training prompt. No goal image, so
+   the arm-pose shortcut of the earlier rule disappears, and the sentence
+   carries what a goal image carries after perception, the board, which is
+   a stated advantage for the VLA. Template choice: the family whose
+   per-token T5 embeddings separate one-ring-different boards best (four
+   candidates encoded on September 30; result below). The existing six-task
+   phrasing is not reused, because "from peg A to peg C" presumes a
+   full-stack start that the play rows do not have.
+
+   Template check (T5-11B, float32, CPU job 18882631, script and JSON under
+   `data/hanoi_cosmos/smoke/prompt_diagnostic*`): four templates were
+   encoded for all 81 boards and compared by the summed per-token L2
+   divergence between prompts, the quantity that separated the six task
+   prompts (their closest pair scores 18.1 and their probe reached 97%).
+   The hardest cases are boards that differ by one ring.
+
+   | Template | Tokens | Closest pair, all boards | Closest one-ring pair | Mean one-ring pair | Pooled cosine, min |
+   |---|---|---|---|---|---|
+   | Peg contents: "Goal: peg A holds rings 1, 2, 3 and 4, peg B is empty, peg C is empty." | 25 | 18.1 | 72.4 | 103.4 | 0.833 |
+   | Ring on peg: "Goal: ring 1 on peg A, ring 2 on peg A, ring 3 on peg A, ring 4 on peg A." | 35 | 11.0 | 11.0 | 46.8 | 0.947 |
+   | Sizes: "Arrange the rings so that the smallest ring is on peg A, ..." | 48 | 13.7 | 13.7 | 59.6 | 0.947 |
+   | Task style: "Move the rings following Tower of Hanoi rules until ring 1 is on peg A, ..." | 47 | 15.1 | 15.1 | 58.8 | 0.955 |
+   | Reference: the six task prompts | 32 | 18.1 | | 37.7 (all pairs) | 0.972 |
+
+   Decision: the peg-contents template. Moving one ring changes two clauses,
+   so its closest one-ring pair is four times the six-task reference and
+   six times the ring-on-peg template's; its closest pair overall equals the
+   reference. Rings are numbered from the smallest; a peg with one ring reads
+   "peg C holds ring 1", an empty peg "peg B is empty"; every board is 25
+   tokens. The divergence is a proxy: the deployment gate remains the
+   language probe after training, as in the six-task run.
+5. Execution control. The same VLA handed the planner's next-board sentence
+   at test (the template instance of the next board), with the same
+   cut-and-hold semantics, so both sides consume the same sub-goal privilege.
 6. Instruction run, supplementary. Every row of move i, open through retreat,
    carries the command of move i (ring, source peg, target peg: 24 templates
    served as cached T5 embeddings, the six-task mechanism); chunk cut at move
