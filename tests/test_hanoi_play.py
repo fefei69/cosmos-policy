@@ -192,3 +192,52 @@ def test_prepare_and_dataset(synthetic, tmp_path):
         pickle.dump(bad, f)
     with pytest.raises(ValueError, match='identical'):
         HanoiPlayDataset(out, tmp_path / 'dup.pkl', split='val')
+
+
+def test_policy_requires_a_verbatim_goal_sentence(tmp_path):
+    from cosmos_policy.experiments.robot.hanoi.play_policy import HanoiPlayInferenceConfig, resolve_goal, validate_checkpoint_contract
+    assert resolve_goal(prompt_for_board('BAAA')) == 'BAAA' and resolve_goal(PROMPTS[BOARD_INDEX['CCCC']]) == 'CCCC'
+    for bad in ('Move all four rings from peg A to peg C following Tower of Hanoi rules.', PROMPTS[0].lower(), PROMPTS[0][:-1], '', None):
+        with pytest.raises(ValueError, match='verbatim'):
+            resolve_goal(bad)
+    cfg = HanoiPlayInferenceConfig('ckpt.pt', 'stats.json', 'emb.pkl')
+    assert cfg.chunk_size == HORIZON and cfg.config_file.endswith('hanoi_play_config.py') and cfg.config.endswith('play__inference')
+    run = tmp_path / 'run'; (run / 'exports').mkdir(parents=True)
+    stats = tmp_path / 'stats.json'; stats.write_text('{}')
+    emb = tmp_path / 'emb.pkl'; emb.write_bytes(b'x')
+    export = run / 'exports' / 'iter_000002000.pt'
+    (run / 'joint_contract.json').write_text(json.dumps({'contract': CONTRACT, 'statistics_sha256': sha256(stats), 'prompts_sha256': PROMPTS_SHA256,
+                                                         'embeddings_sha256': sha256(emb), 'horizon': HORIZON}))
+    assert validate_checkpoint_contract(export, stats, emb)['contract'] == CONTRACT
+    (run / 'joint_contract.json').write_text(json.dumps({'contract': CONTRACT, 'statistics_sha256': sha256(stats), 'prompts_sha256': 'other',
+                                                         'embeddings_sha256': sha256(emb), 'horizon': HORIZON}))
+    with pytest.raises(ValueError, match='goal sentences'):
+        validate_checkpoint_contract(export, stats, emb)
+
+
+def test_probe_pairs_need_same_board_close_state_and_different_goal(synthetic, tmp_path):
+    from cosmos_policy.experiments.robot.hanoi.run_hanoi_play_eval import decision_rows, matched_goal_pairs
+    manifest = read_manifest(synthetic['manifest'])
+    with h5py.File(synthetic['play'], 'r') as p, h5py.File(synthetic['expert'], 'r') as e:
+        z, _ = build_split(load_columns(p), load_columns(e), manifest, 'train', np.random.default_rng(1))
+    rows = decision_rows(z)
+    assert len(rows) and set(z['motion_stages'][rows].tolist()) <= set(DECISION_STAGES)
+    pairs = matched_goal_pairs(z, rows, match_mm=1e9, decision_mm=0.0)
+    for i, j, gap in pairs:
+        assert z['board_indices'][i] == z['board_indices'][j] and z['goal_board_indices'][i] != z['goal_board_indices'][j] and gap > 0
+    assert matched_goal_pairs(z, rows, match_mm=0.0, decision_mm=1e9) == []
+
+
+def test_config_and_launcher_import(monkeypatch):
+    import importlib
+    import subprocess
+    monkeypatch.setenv('COSMOS_POLICY_PLATFORM', 'hanoi_dense')
+    monkeypatch.setenv('HANOI_DENSE_HORIZON', str(HORIZON))
+    try:
+        config = importlib.import_module('cosmos_policy.config.hanoi_play_config')
+    except subprocess.CalledProcessError:  # the base config probes the CUDA runtime, absent on login nodes
+        pytest.skip('CUDA runtime libraries unavailable on this host')
+    assert config.MAX_UPDATES == 32000 and config.SAVE_EVERY == 2000 and config.EXPERIMENT == 'cosmos_predict2_2b_hanoi_play'
+    launcher = importlib.import_module('examples.hanoi.run_play')
+    assert launcher.run_name_for('video') == 'hanoi_cosmos_play_20260930_video_init'
+    assert 'cosmos_policy/datasets/hanoi_play_data.py' in launcher.CODE_PATHS and launcher.STAGE_EVAL['stride'] == 27
