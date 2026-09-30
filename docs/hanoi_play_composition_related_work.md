@@ -808,6 +808,57 @@ Rules, one per training row t:
    board, with the per-goal-board training counts published; CCCC never
    headlined alone.
 
+### 6.11 What a perfect imitator of the labels would do
+
+September 30, 2026. Under rules 2 and 3 the labelled next move given (board,
+goal board) is a distribution over neighbours, so a policy that reproduced it
+exactly is a Markov chain over boards for each goal. Simulated from the
+routes of the training walks with a budget of 30 moves (twice the optimum),
+counting a visit to a (board, goal) pair that never occurs in training as a
+failure ("strict") or as a uniformly random legal move ("guess"):
+
+| Task | Manifest as is: P(solve) strict / guess | Path boards labelled for this goal | Without the ten walks: strict / guess | Path boards labelled |
+|---|---|---|---|---|
+| AAAA to CCCC | 93% / 93% (about 20 moves) | 15 of 15 | 0% / 91% | 14 of 15 (AAAA itself unlabelled) |
+| CCCC to AAAA | 100% / 100% | 12 of 15 | 0% / 0% | 0 of 15 |
+| AAAA to BBBB | 0% / 0.2% | 3 of 15 | 0% / 0% | 0 of 15 |
+| BBBB to AAAA | 0% / 0.1% | 2 of 15 | 0% / 0% | 0 of 15 |
+| BBBB to CCCC | 96% / 96% | 15 of 15 | 0% / 99.6% | 14 of 15 |
+| CCCC to BBBB | 100% / 100% | 15 of 15 | 0% / 0% | 0 of 15 |
+
+(Board, goal) pairs with any label: 3,604 of 6,480 with the full manifest,
+3,396 without the ten walks.
+
+Reading. Every solve walk ends at CCCC, so every board visited in a solve
+walk is labelled with goal CCCC and a mostly progressing move (90% on the
+optimal path). Goal CCCC is therefore an in-distribution goal-conditioned
+demonstration for the whole graph, and a perfect imitator solves AAAA to
+CCCC and BBBB to CCCC without any full trajectory in the data; removing the
+ten walks only removes the label at the start board, one unseen decision.
+Those two tasks are not stitching tests under hindsight labels. Goals AAAA
+and BBBB never terminate a walk, so the pairs (board, AAAA) and (board,
+BBBB) are almost never labelled (24 and 76 occurrences, most of them in the
+ten walks): the four tasks into AAAA or BBBB require the policy to act on
+(board, goal) pairs it has never seen together, which is stitching in
+Ghugare et al.'s sense, and a perfect imitator scores 0%. This is the
+mechanism PLDM states: far-away goals are out of distribution for the
+goal-conditioned policy.
+
+Consequences for the design.
+
+1. Headline the tasks into AAAA and BBBB, never AAAA to CCCC alone; report
+   the goal CCCC tasks as the in-distribution reference.
+2. Better, make composition depth explicit with a hindsight horizon cap k
+   (rule 3 restricted to goals at most k moves ahead), the manipulation
+   analogue of PLDM's short-episode test (16-step episodes against 90-step
+   goals). With k < 15 no training pair spans any of the six tasks, whatever
+   the walks contain, the first 15 - k decisions of every task are unseen
+   pairs by construction, and k = 1, 2, 4, 8 gives the horizon curve of
+   section 4 on the VLA side. With k = 1 both systems have learned exactly
+   one-move competence from the same rows and only the planner composes.
+3. The ten contaminated walks matter only through goals more than k moves
+   ahead; under a cap they can stay in both systems' training.
+
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
