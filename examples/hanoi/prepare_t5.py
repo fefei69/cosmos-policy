@@ -1,4 +1,4 @@
-"""Download T5 on a CPU host, then cache the Hanoi instruction embeddings (the two handover prompts, or the six multitask prompts)."""
+"""Download T5 on a CPU host, then cache the Hanoi instruction embeddings (the two handover prompts, the six multitask prompts, or the 81 play goal sentences)."""
 
 import argparse
 import json
@@ -18,12 +18,18 @@ PROMPTS = (
 
 
 def prompt_set(name):
-    """'handover': the two single-direction prompts above; 'multitask': the six prompts of hanoi_multitask_data."""
+    """'handover': the two single-direction prompts above; 'multitask': the six prompts of hanoi_multitask_data;
+    'play': the 81 goal-board sentences of hanoi_play_data."""
     if name == "handover":
         return PROMPTS, ROOT / "data/hanoi_cosmos/t5_embeddings.pkl"
     import sys
 
     sys.path.insert(0, str(ROOT))
+    if name == "play":
+        from cosmos_policy.datasets.hanoi_play_data import DEFAULT_EMBEDDINGS as play_embeddings
+        from cosmos_policy.datasets.hanoi_play_data import PROMPTS as play_prompts
+
+        return play_prompts, ROOT / play_embeddings
     from cosmos_policy.datasets.hanoi_multitask_data import DEFAULT_EMBEDDINGS
     from cosmos_policy.datasets.hanoi_multitask_data import PROMPTS as multitask_prompts
 
@@ -39,7 +45,7 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("download", "encode"))
     parser.add_argument("--model-dir", type=Path, default=ROOT / "checkpoints/google-t5/t5-11b")
-    parser.add_argument("--prompt-set", choices=("handover", "multitask"), default="handover")
+    parser.add_argument("--prompt-set", choices=("handover", "multitask", "play"), default="handover")
     parser.add_argument("--output", type=Path, default=None, help="Default depends on --prompt-set")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--precision", choices=("float32", "bfloat16"), default="float32")
