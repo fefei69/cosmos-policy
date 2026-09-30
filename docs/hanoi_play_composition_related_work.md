@@ -738,12 +738,20 @@ Rules, one per training row t:
    goal move would be labelled with the start of the walk's next, unrelated
    move, a target nothing observable explains, and the VLA would never learn
    to stop at the goal.
-3. Goal board. Sample the move index j uniformly over the current move and
-   every later move of the walk; the goal board is the board after move j.
-   Lateral and regress labels are kept; no filtering, no reweighting. The
-   snap to move ends is the one deviation from row-level uniform sampling,
-   disclosed. This is hindsight relabelling in the LangLfP and CALVIN sense,
-   with a templated sentence instead of a human or a task detector.
+3. Goal board, with a horizon cap. Sample the move index j uniformly over
+   the current move and the later moves of the walk within a cap of k moves
+   (j from i to min(i + k - 1, last move)); the goal board is the board after
+   move j. Lateral and regress labels are kept; no filtering, no reweighting.
+   The segment therefore contains one to k moves, its achieved end board is
+   the goal, and its recorded actions are the target, hindsight relabelling
+   in the LangLfP and CALVIN sense with a templated sentence instead of a
+   human or a task detector. The cap is what makes the six tasks stitching
+   tests (section 6.11): with k below 15 no labelled pair spans a task, and
+   the first 15 - k decisions of every task are unseen (board, goal) pairs.
+   Proposed default k = 5 (the data's optimal segments have median reach 4);
+   k = 1, 2, 4, 8 for the horizon curve. Uncapped k is the in-distribution
+   reference, not the comparison. Two deviations from row-level uniform
+   sampling, the snap to move ends and the cap, disclosed.
 4. Goal sentence. The goal board is put into words with one fixed template
    over all 81 boards, rings numbered from the smallest, one sentence per
    board, served as cached T5 embeddings exactly as the six-task run serves
