@@ -867,6 +867,35 @@ Consequences for the design.
 3. The ten contaminated walks matter only through goals more than k moves
    ahead; under a cap they can stay in both systems' training.
 
+### 6.12 Build log
+
+September 30, 2026. Contract `hanoi_play_k5_cosmos_v1`. Modules:
+`cosmos_policy/datasets/hanoi_play_data.py` (boards, `prompt_for_board`, the
+Hanoi graph, manifest reading, labels applied at preparation time),
+`hanoi_play_dataset.py`, `config/hanoi_play_config.py` (the six-task recipe
+unchanged: 32,000 updates, exports every 2,000, seven latent slots),
+`experiments/robot/hanoi/play_policy.py`, `run_hanoi_play_eval.py` (tables by
+goal horizon, graph distance, stage and segment kind; decision rows; the
+matched-goal decision probe and the shuffled-goal sensitivity; the implied-move
+stitching proxy is not implemented), `serve_hanoi_play.py`, launcher
+`examples/hanoi/run_play.py` with `train_play.sbatch`. Prompt cache
+`data/hanoi_cosmos/t5_embeddings_play.pkl` (81 sentences, T5-11B, job
+18889736). Dataset `data/hanoi_cosmos/play_k5` (job 18889897, 3 min):
+
+| Split | Rows | Of which walks / crops / clips | Decision rows | Goal reached / progress / lateral / regress | Full-stack goal rows AAAA / BBBB / CCCC |
+|---|---|---|---|---|---|
+| train | 800,571 | 785,001 / 12,634 / 2,936 (78 walks, 12 crop walks, 4 clips) | 255,812 | 5.2% / 82.4% / 15.7% / 1.9% | 3,721 / 4,140 / 55,053 |
+| validation | 100,342 | 10 walks | 31,942 | 4.0% / 81.9% / 16.2% / 2.0% | 2,791 / 1,364 / 5,377 |
+| test | 100,163 | 10 walks | 31,765 | 4.4% / 82.4% / 15.5% / 2.1% | 0 / 409 / 9,878 |
+
+Goal horizon in the training rows: 0 moves 183,593, 1 move 184,542, 2 moves
+156,749, 3 moves 142,768, 4 moves 132,919 (the row's own move counts as 0).
+Graph distance of the goal: 0 to 5 as 41,750 / 230,012 / 184,626 / 166,156 /
+115,327 / 62,700. Distinct (board, goal) pairs in training: 1,511 of 6,480.
+Padded slots 1.3% of all slots; 1,223 all-hold chunks. Normalisation ranges
+equal the six-task run's to within 2 mm. The manifest's crops inside whole
+walks (three in walk 15, one in walk 104) are skipped as already covered; the
+row total of 800,571 matches the manifest README's figure of about 801,000.
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
