@@ -542,18 +542,148 @@ to composition: value-based offline goal-conditioned RL also stitches (Park et
 al., 2025; Sobal et al., 2025) and stitching-aware augmentation partially
 closes the gap for supervised policies (Ghugare et al., 2024)."
 
-## 6. Bearing on the pending same-data Cosmos run
+## 6. The same-data VLA on the play recording: recipe
 
-The Cosmos-side proposal of September 30 was per-move instruction
-conditioning with a scripted solver, because episode-goal conditioning leaves
-45% of (board, goal) occurrences with more than one correct next move. The
-literature's fair head-to-head is different: the VLA gets the same goal image
-as the world model, with hindsight relabelling over the play walks (PLDM,
-CompPlan, TVF, TACO-RL all condition both sides on the same goal signal). The
-per-move-instruction run is then the execution control of caution 6 (the VLA
-given the planner's decomposition), not the head-to-head. The two runs answer
-different questions and the decision on which to build first is the user's;
-nothing has been built.
+Written September 30, 2026, after a verification pass (OGBench, PLDM,
+CompPlan, TACO-RL, CALVIN and TVF source code and appendices; the Cosmos
+code path for an extra image slot; an adversarial review of the draft).
+Nothing here is built.
+
+### 6.1 Data and the absence audit
+
+Exactly the manifest's training set (78 whole walks, 18 one-move crops, 4
+expert clips), their frame filter, every remaining 30 Hz row as an
+observation, their validation and test walks. The manifest's "no whole task
+episodes" rule removes walks whose endpoints are task endpoints, but it does
+not catch walks that pass through both endpoints mid-episode. Routes of the
+78 training walks (from the recording's JSON sidecar; the 81-state graph has
+diameter 15 and a unique shortest path between full stacks):
+
+| Task | Training walks containing start before goal | Longest contiguous optimal-path segment in any training walk |
+|---|---|---|
+| AAAA to CCCC | 1 (walk 26: AAAA at move 4 to CCCC at move 20, 16 moves, 14 on the optimal path) | 13 of 15 (walk 52, BCAA to CCCC); 12 in walks 44 and 70 |
+| CCCC to AAAA | 1 (walk 121: whole 20-move walk, 10 optimal) | 12 (walk 81) |
+| AAAA to BBBB | 0 | 8 (walk 0) |
+| BBBB to AAAA | 0 | 5 |
+| BBBB to CCCC | 5 (walk 9: 17 moves, 12 optimal; walks 60, 84, 100, 104 whole, 8 to 13 optimal) | 14 (walks 48 and 56, ABBB to CCCC) |
+| CCCC to BBBB | 3 (walk 39: 16 moves, 14 optimal; walks 15 and 103 whole, 13 and 11 optimal) | 14 (walk 39, CCCC to ABBB) |
+
+Co-occurring (current board, future board) pairs within one training walk:
+16,380; graph distance 15 for 298 of them (1.8%), at least 10 for 3,294
+(20%). Future board is a full stack in 780 pairs for CCCC, 78 for BBBB, 24
+for AAAA.
+
+Only AAAA to BBBB and BBBB to AAAA are clean. Two consistent options, the
+choice is the user's: rebuild the manifest without walks 9, 15, 26, 39, 60,
+84, 100, 103, 104 and 121 and the four expert clips and retrain both systems
+on it; or keep the manifest for both systems, make AAAA to BBBB and BBBB to
+AAAA the headline tasks, and publish this table per (start, goal) pair.
+Excluding walks for the VLA only would handicap it on four of six tasks.
+
+### 6.2 Conditioning and goal sampling
+
+Goal image only, the signal CIDM gets; no language (Cosmos needs one constant
+T5 prompt embedding because text dropout is 0 and the conditioner requires an
+embedding; the multitask cache serves one fixed prompt as the degenerate
+case). Training goal: a future frame of the same walk, drawn uniformly from
+the rows after the current row up to the walk's last row. This is the OGBench
+GCBC default (gcbc.py: actor_p_trajgoal 1.0, actor_geom_sample False,
+actor_p_randomgoal 0.0; datasets.py samples uniformly from idx+1 to the
+trajectory's final state), used unchanged by PLDM; CompPlan uses a geometric
+version with a per-domain discount; TACO-RL and CALVIN's LMP use the last
+frame of a window of 8 to 16 or 16 to 32 frames; TVF uses the episode's final
+image. One disclosed deviation: snap the sampled goal row to the nearest
+canonical frame (settled board, arm in a canonical pose), because a goal
+frame with the arm mid-move leaks the move just made (a goal-only shortcut in
+the sense of Ghugare et al., Appendix B). The same canonical-frame rule must
+be what CIDM receives at test time, which depends on the open question in
+6.9. Optional ablation: geometric sampling with a mean horizon of one to two
+moves (500 to 1,000 rows), the CompPlan analogue.
+
+### 6.3 Labels
+
+Dense v5 rule unchanged: 16 slots at 10 Hz, absolute XYZ plus jaw intent,
+slot j = row t + 3j, padded past the walk's end. The execution side stays
+identical to the validated six-task recipe.
+
+### 6.4 Cosmos implementation
+
+Nine latent slots in the LIBERO geometry: blank, proprio, image, goal image,
+action, future proprio, future image, future goal (the goal repeated, a
+fixed target), value; state_t 9, min and max conditional frames 4 (the
+conditioner marks the first num_conditional_frames latent frames as clean, so
+the goal must sit among the leading slots), chunk_duration 33. No model-code
+change: the DiT and VAE accept any 1 + 4k length up to 128 latent frames and
+the checkpoint has no state_t-shaped weights (the state_t 9 LIBERO checkpoint
+already loads into the state_t 7 Hanoi net). What changes: a new dataset
+class and contract that records state_t, slot order, goal-source rule and the
+sqrt(state_t) noise multiplier; the config; validate_dense_config
+(num_third_person_images 2) and the (7, 3) check in load_dense_policy;
+make_joint_observation (secondary_image), HanoiDensePolicy.infer and the
+server payload (goal-image key); the evaluator constants HANOI_UNDO_INJECTION
+and FUTURE_FRAME_INDEX; the parity path. About 29% more tokens per sample, so
+the micro-batch may need lowering. Video-base init as in every Hanoi run
+(LIBERO's slot 3 was its primary image, so its weights would transfer with
+different semantics). pi0.5 mirror: the goal image as a second camera image,
+owned by the OpenPI agent.
+
+### 6.5 Training and checkpoint selection
+
+The dense recipe, effective batch 32, export every 2,000, at least 64,000
+updates (two cycles, as the six-task run needed): the training split is about
+0.8M rows, so 32,000 updates is 1.3 passes, while OGBench's pixel GCBC trains
+500,000 steps at batch 256. Do not select by overall validation chunk error:
+a move lasts 16.5 s on average (2,625 move segments, mean 495 rows) against a
+1.6 s chunk, so most rows are goal-insensitive and a goal-ignoring checkpoint
+can score best. Select on decision rows (pre-pick motion stages) with a
+shuffled-goal control: the same state decoded under the true goal and a wrong
+goal, reporting chunk divergence and source-peg agreement, with the full
+curves published.
+
+### 6.6 Runs
+
+- (a) The goal-image VLA given the final goal frame: the head-to-head.
+- (c) The same VLA given the planner's next-board goal frame: the execution
+  control (World Action Planner Table 8, TACO-RL Table 1 vs 2, CompPlan). If
+  the planner consumes anything beyond images (the hand-coded 81-node graph,
+  a board classifier), (a) is a system-level comparison and (c) is the
+  headline model-level one; add a VLA variant with the same sub-goal
+  privilege so both sides have equal information. State what the planner
+  consumes.
+- (b) A per-move-instruction VLA with a scripted solver: supplementary; it
+  measures a different model's execution.
+
+### 6.7 Evaluation
+
+A fixed, shared list of (start board, goal board) pairs per graph distance 1,
+3, 7 and 15, with the same physical resets, the same recorded goal frame and a
+step budget of twice the optimal move count for both systems; report success
+and moves before the first error per pair, plus the in-data prefix per pair.
+Offline proxy on decision rows only: classify the source peg from the
+approach heading and jaw intent inside the chunk (the release comes about 15
+s later, so release position is not in the chunk), or decode the future-image
+slot and read the board; calibrate the classifier on same-episode goals first
+and report its accuracy; score whether the implied move reduces graph
+distance to the goal; report same-episode and cross-episode goals side by
+side.
+
+### 6.8 Audit tables to publish
+
+Under the chosen sampler: the fraction of (state, goal, action) triples whose
+action increases graph distance to the goal, split by phase (the scramble
+half labels distance-increasing actions whenever the goal lies past the
+scramble, the Brandfonbrener distractor regime); per-goal-board counts at
+each graph distance; the 45% and 64% label-ambiguity figures with OGBench
+Table 5 against the label-noise objection; optionally an ablation that
+restricts goal sampling to the current phase.
+
+### 6.9 The open question
+
+What is the world model's test-time goal image: a real recorded frame of the
+target board (from which episode, with the arm in what pose), a canonical
+render, or a same-episode frame; and will the VLA be handed that identical
+frame at both training-goal sampling and evaluation? The goal-frame rule in
+6.2 cannot be fixed until this is answered.
 
 ## 7. Corrections to the interim list sent on September 30
 
