@@ -896,6 +896,14 @@ Padded slots 1.3% of all slots; 1,223 all-hold chunks. Normalisation ranges
 equal the six-task run's to within 2 mm. The manifest's crops inside whole
 walks (three in walk 15, one in walk 104) are skipped as already covered; the
 row total of 800,571 matches the manifest README's figure of about 801,000.
+
+Run `hanoi_cosmos_play_20260930_video_init` (video-base init, the six-task
+recipe): jobs 18890442, 18890443 and 18890444, three chained 12-hour
+allocations, submitted September 30, 2026. The launcher qualifies first
+(two updates, resume, export, serving parity within 2 mm), then trains in
+stages of 2,000 updates with a stride-27 validation pass after each export,
+selects by decision 11, and evaluates the selected export on validation and
+test at stride 9 with the goal probe.
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
