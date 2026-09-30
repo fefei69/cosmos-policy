@@ -549,6 +549,9 @@ CompPlan, TACO-RL, CALVIN and TVF source code and appendices; the Cosmos
 code path for an extra image slot; an adversarial review of the draft).
 Nothing here is built.
 
+Section 6.10 holds the final labeling rules; where 6.2 or 6.3 differ from
+it, 6.10 wins.
+
 ### 6.1 Data and the absence audit
 
 Exactly the manifest's training set (78 whole walks, 18 one-move crops, 4
@@ -684,6 +687,93 @@ target board (from which episode, with the arm in what pose), a canonical
 render, or a same-episode frame; and will the VLA be handed that identical
 frame at both training-goal sampling and evaluation? The goal-frame rule in
 6.2 cannot be fixed until this is answered.
+
+### 6.10 Labeling rules for the play data (final)
+
+Written September 30, 2026, after a second verification pass. Precedent
+rules checked at the source: OGBench GCBC samples the goal uniformly over the
+future states of the same trajectory, k ~ Unif(min(t+1, T-1), T-1), with no
+filtering or reweighting of (state, action, goal) triples; GCSL uses every
+(t, h) pair without reweighting; WGCSL down-weights low-advantage labels but
+never removes them (floor 0.05); Play-LMP, LangLfP and CALVIN take the last
+frame of a 16-to-32-frame window as the goal and put the loss only on the
+actions inside the window; TACO-RL uses 8-to-16-frame windows and is the one
+precedent that discusses the arm in goal images ("LMP has a strong bias
+towards the end-effector position ignoring the changes in the environment");
+TVF uses the demonstration's final image. Measured on the 78 training walks
+(routes from the recording's sidecar, stages and poses from the h5 file):
+
+| Quantity | Value |
+|---|---|
+| Training rows after the stale/repeated filter | 785,001 |
+| Rows per move, mean / median | 480 / 500 (16 s) |
+| Pre-grasp rows per move (open, approach_source, descend_source) | 161 |
+| Decision rows (approach_source + transit stages) | 251,010 (32%) |
+| Labels under rule 3 that reduce / keep / increase graph distance to the goal | 78.4% / 16.6% / 5.0% |
+| (board, goal) occurrences whose pair has more than one next move in training | 59.1% (majority move 82.3%) |
+| Labels that are an optimal move for their goal | 78.4% |
+| Goal at graph distance 1 / at least 10 / 15 | 11.7% / 20% / 1.8% |
+| Future full-stack goal boards, CCCC / BBBB / AAAA | 780 / 76 / 24 pairs |
+| (row, goal) pairs whose segment is a shortest path (rule 7) | 47.7%; farthest optimal goal median 4 moves, at least 5 moves for 45% of moves |
+| (board, goal) pairs with more than one optimal next move | 282 of 6,480 (4.4%) |
+| Commanded y at the first row of a move, across pegs | std 57 mm, range 142 mm |
+| Stage at the first / last row of every move | open / retreat; board label updated by the last row |
+
+Rules, one per training row t:
+
+1. Rows and observation. The identical manifest the world model uses (78
+   whole walks, 18 one-move crops, 4 expert clips), the same filter, every
+   surviving 30 Hz row a training row; observation = the image and the six
+   joints plus jaw; no row weighting.
+2. Action target. The dense v5 chunk geometry (16 slots at 10 Hz, slot j =
+   row t + 3j, absolute XYZ from reference_pose plus jaw intent from
+   action_abs), cut at the last row of the commanded segment and padded with
+   that row's pose and jaw, the existing walk-end rule: the goal move's last
+   row in the goal run, the current move's last row in the instruction run,
+   the walk's last row otherwise. Rows after the release of the goal move
+   carry an all-hold chunk. Without the cut, rows in the last 1.6 s of the
+   goal move would be labelled with the start of the walk's next, unrelated
+   move, a target nothing observable explains, and the VLA would never learn
+   to stop at the goal.
+3. Goal board. Sample the move index j uniformly over the current move and
+   every later move of the walk; the goal board is the board after move j.
+   Lateral and regress labels are kept; no filtering, no reweighting. The
+   snap to move ends is the one deviation from row-level uniform sampling,
+   disclosed.
+4. Goal pixels. The settled frame (the last non-stale row of a move, retreat
+   stage) of a uniformly random recorded occurrence of the goal board
+   anywhere in the training walks, not necessarily the same walk. The arm
+   never returns home, so a same-walk goal frame shows the arm over the
+   segment's last target peg, a goal-only shortcut. Two probes to publish:
+   the board is readable from settled frames with the arm over each peg, and
+   the next target peg cannot be predicted from the goal frame alone (chance).
+5. Execution control. The same goal-image VLA handed the planner's next-board
+   settled frame at test, with the same cut-and-hold semantics, so both sides
+   consume the same sub-goal privilege.
+6. Instruction run, supplementary. Every row of move i, open through retreat,
+   carries the command of move i (ring, source peg, target peg: 24 templates
+   served as cached T5 embeddings, the six-task mechanism); chunk cut at move
+   i's last row; at test the controller issues the next command once the
+   board is settled, the same event as the training cut; a walk's terminal
+   hold rows carry a hold command.
+7. Oracle-filtered ablation. Rules 1 to 4 restricted to (row, goal) pairs
+   whose recorded segment is a shortest path to the goal board. It uses the
+   Hanoi graph, so it is reported only next to a statement of what the
+   planner consumes (hand-coded or learned graph), paired with rule 5, and
+   never as the head-to-head.
+8. Selection and test. Checkpoint selection on approach_source and transit
+   rows: sample several chunks, classify the implied source or target peg
+   from the approach heading and jaw intent (calibrated on same-episode
+   goals), report agreement with the recorded peg and with the optimal-peg
+   set, and require a shuffled-goal control to fall to chance; XYZ error
+   reported, not selected on. Test resets from the play distribution (arm
+   above a peg after a settled move) or a stated home start added to both
+   systems' data, because the manifest's task start "arm still at home"
+   occurs in none of the play rows. Goal frames from the held-out walks,
+   identical for both systems, episode and arm pose recorded; a fixed shared
+   (start, goal) list stratified by graph distance 1, 3, 7, 15 and by goal
+   board, with the per-goal-board training counts published; CCCC never
+   headlined alone.
 
 ## 7. Corrections to the interim list sent on September 30
 
