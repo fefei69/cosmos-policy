@@ -10,4 +10,6 @@ data/hanoi_cosmos/t5_embeddings_play.pkl
 data/hanoi_cosmos/t5_embeddings_play.json
 checkpoints/public/Wan2.1_VAE.pth
 checkpoints/public/manifest.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/probe_v2_val.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/probe_v2_test.json
 # selected export sha256 1544c36873db0c9f3fa40287133f3265e031ae40e8958c176c58e9e9ed4472c6 (3.9 GB); serve with cosmos_policy/experiments/robot/hanoi/serve_hanoi_play.py --checkpoint <export> --stats data/hanoi_cosmos/play_k5/dataset_statistics.json --embeddings data/hanoi_cosmos/t5_embeddings_play.pkl
