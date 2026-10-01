@@ -952,6 +952,31 @@ other sentence moves the chunk by 11 mm on average but 0.2 mm at the median,
 against a redraw noise of 0.5 mm median, so on most decision rows the
 sentence changed nothing. The corrected probe reports the fraction of rows
 moved by more than 5 mm.
+
+**Goal probe, corrected (job 18972247, 128 pairs and 128 shuffled rows per
+split, the same seeds).**
+
+| Split | Own sentence correct | Other row's sentence correct | Decision accuracy | Approach: own / swapped | Transit: own / swapped | Swap displacement mean / median mm | Rows moved more than 5 mm by a random sentence |
+|---|---|---|---|---|---|---|---|
+| validation | 94.5% | 46.9% | 70.7% | 95% / 59% | 93% / 24% | 23.4 / 0.6 | 22% |
+| test | 92.2% | 41.4% | 66.8% | 98% / 47% | 81% / 30% | 21.9 / 0.4 | 20% |
+
+Reading. If the policy ignored the sentence, the swapped score would be the
+complement of the own score, about 5%; if it followed it, close to the own
+score. At 41 to 47% the sentence decides roughly half of the matched
+decisions and the observation decides the other half; the median swap
+displacement below 1 mm says that in more than half of the pairs the sentence
+changed nothing. The split by stage is the useful part: at the pick (approach
+rows) the sentence wins about half the time, at the place (transit rows) it
+wins a quarter of the time, so a held ring mostly goes where the play prior
+sends it. The six-task run's probe scored 97% on its same-start pairs. The
+difference is expected from the labels: 68% of rows are goal-insensitive,
+the loss is a mean over all slots, and a policy that reads the sentence only
+sometimes already fits most of the data. This is the goal-ignoring risk the
+review flagged, now measured. It does not change the execution numbers, and
+it is exactly what the arm test must separate: the execution control (the
+same policy given the next-board sentence) will show whether single moves
+follow the sentence when the goal is one move away.
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
