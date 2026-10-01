@@ -1,4 +1,4 @@
-"""Download T5 on a CPU host, then cache the two Hanoi instruction embeddings."""
+"""Download T5 on a CPU host, then cache the Hanoi instruction embeddings (the two handover prompts, the six multitask prompts, or the 81 play goal sentences)."""
 
 import argparse
 import json
@@ -17,6 +17,25 @@ PROMPTS = (
 )
 
 
+def prompt_set(name):
+    """'handover': the two single-direction prompts above; 'multitask': the six prompts of hanoi_multitask_data;
+    'play': the 81 goal-board sentences of hanoi_play_data."""
+    if name == "handover":
+        return PROMPTS, ROOT / "data/hanoi_cosmos/t5_embeddings.pkl"
+    import sys
+
+    sys.path.insert(0, str(ROOT))
+    if name == "play":
+        from cosmos_policy.datasets.hanoi_play_data import DEFAULT_EMBEDDINGS as play_embeddings
+        from cosmos_policy.datasets.hanoi_play_data import PROMPTS as play_prompts
+
+        return play_prompts, ROOT / play_embeddings
+    from cosmos_policy.datasets.hanoi_multitask_data import DEFAULT_EMBEDDINGS
+    from cosmos_policy.datasets.hanoi_multitask_data import PROMPTS as multitask_prompts
+
+    return multitask_prompts, ROOT / DEFAULT_EMBEDDINGS
+
+
 def peak_process_rss_gib():
     """Linux ru_maxrss is KiB; this includes the transient checkpoint load."""
     return resource.getrusage(resource.RUSAGE_SELF).ru_maxrss / (1024**2)
@@ -26,10 +45,14 @@ def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("phase", choices=("download", "encode"))
     parser.add_argument("--model-dir", type=Path, default=ROOT / "checkpoints/google-t5/t5-11b")
-    parser.add_argument("--output", type=Path, default=ROOT / "data/hanoi_cosmos/t5_embeddings.pkl")
+    parser.add_argument("--prompt-set", choices=("handover", "multitask", "play"), default="handover")
+    parser.add_argument("--output", type=Path, default=None, help="Default depends on --prompt-set")
     parser.add_argument("--threads", type=int, default=8)
     parser.add_argument("--precision", choices=("float32", "bfloat16"), default="float32")
     args = parser.parse_args()
+    prompts, default_output = prompt_set(args.prompt_set)
+    if args.output is None:
+        args.output = default_output
     os.environ["HF_HOME"] = str(ROOT / ".cache/huggingface")
     os.environ["HF_HUB_CACHE"] = str(ROOT / ".cache/huggingface/hub")
     os.environ.setdefault("NUMPY_MADVISE_HUGEPAGE", "0")
@@ -50,9 +73,9 @@ def main():
     if args.output.exists():
         with args.output.open("rb") as stream:
             existing = pickle.load(stream)
-        if set(existing) != set(PROMPTS) or any(
+        if set(existing) != set(prompts) or any(
             tuple(existing[prompt].shape) != (1, 512, 1024) or not torch.isfinite(existing[prompt]).all()
-            for prompt in PROMPTS
+            for prompt in prompts
         ):
             raise RuntimeError(f"Existing cache is invalid; refusing to overwrite: {args.output}")
         print(f"Valid embeddings already exist: {args.output}", flush=True)
@@ -83,7 +106,7 @@ def main():
     )
     embeddings = {}
     with torch.inference_mode():
-        for prompt in PROMPTS:
+        for prompt in prompts:
             encoded = tokenizer.batch_encode_plus(
                 [prompt],
                 return_tensors="pt",
@@ -123,7 +146,8 @@ def main():
                 "revision": REVISION,
                 "precision": args.precision,
                 "device": "cpu",
-                "prompts": list(PROMPTS),
+                "prompt_set": args.prompt_set,
+                "prompts": list(prompts),
                 "shape": [1, 512, 1024],
                 "elapsed_seconds": time.monotonic() - started,
                 "peak_process_rss_gib": peak_process_rss_gib(),

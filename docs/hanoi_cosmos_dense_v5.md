@@ -304,6 +304,106 @@ scratch under the same name. Run A's continuation was resubmitted with
 `HANOI_DENSE_ACCEPT_CODE_CHANGES` naming this launcher change, since run A had
 started under the previous launcher hash.
 
-Results are appended here as they arrive. For the chunk-32 run the
-like-for-like number against run B and cycle 2 is `mean_valid_slots_first_16`
-(and slot 1); its own `mean_valid_slots` spans 3.2 s and is not comparable.
+For the chunk-32 run the like-for-like number against run B and cycle 2 is
+`mean_valid_slots_first_16` (and slot 1); its own `mean_valid_slots` spans
+3.2 s and is not comparable. Both runs completed on September 21 at about
+06:00 EDT (chunk 32: 11 h 16 min + 2 h 54 min; run A: 11 h 16 min + 2 h 46 min
+of wall time). Both selected their step-16,000 export; both passed serving
+parity (chunk 32: 0.242 mm max over 200 observations; run A: 0.160 mm).
+
+### Chunk-32 run (`hanoi_cosmos_dense_20260920_video_init_h32`)
+
+Per-export validation (every ninth row, 5 denoising steps; "first 16" is the
+mean over slots 1 to 16, "all 32" the decision-11 metric over the whole chunk):
+
+| Step | Slot-1 mm (all / stationary / moving) | Mean first 16 | Mean all 32 | Endpoint (3.2 s) | Jaw acc. |
+|---|---|---|---|---|---|
+| 1,000 | 38.26 / 40.58 / 37.77 | 13.74 | 13.82 | 24.47 | 0.9768 |
+| 2,000 | 6.90 / 7.31 / 6.82 | 6.98 | 7.16 | 10.18 | 0.9911 |
+| 3,000 | 4.89 / 4.59 / 4.95 | 6.19 | 6.48 | 8.56 | 0.9934 |
+| 4,000 | 3.34 / 2.92 / 3.43 | 4.95 | 5.07 | 6.74 | 0.9940 |
+| 5,000 | 3.66 / 3.55 / 3.68 | 5.36 | 5.37 | 7.44 | 0.9949 |
+| 6,000 | 3.04 / 2.73 / 3.11 | 4.50 | 4.53 | 6.21 | 0.9951 |
+| 7,000 | 3.18 / 2.87 / 3.24 | 4.35 | 4.48 | 5.81 | 0.9954 |
+| 8,000 | 2.73 / 2.33 / 2.81 | 4.48 | 4.54 | 6.40 | 0.9958 |
+| 9,000 | 2.50 / 1.81 / 2.64 | 4.09 | 4.06 | 5.84 | 0.9965 |
+| 10,000 | 2.76 / 2.07 / 2.90 | 4.85 | 4.81 | 6.53 | 0.9968 |
+| 11,000 | 2.26 / 1.77 / 2.36 | 3.94 | 4.01 | 5.59 | 0.9969 |
+| 12,000 | 1.99 / 1.80 / 2.03 | 3.70 | 3.89 | 5.57 | 0.9971 |
+| 13,000 | 1.89 / 1.56 / 1.96 | 3.57 | 3.72 | 5.26 | 0.9976 |
+| 14,000 | 1.92 / 1.61 / 1.98 | 3.54 | 3.65 | 4.77 | 0.9975 |
+| 15,000 | 1.63 / 1.57 / 1.64 | 3.52 | 3.58 | 4.82 | 0.9977 |
+| 16,000 | 1.68 / 1.80 / 1.65 | 3.33 | 3.40 | 4.48 | 0.9980 |
+
+Selected step 16,000, SHA-256
+`731665b3072ae5debf8a49dc68659f6bccaf89e024b6a9d2032c5894fbee62ed`.
+Test split (every third row, 11,601 scored, 5 all-padded rows skipped; flips
+are counted over 3.2 s chunks, so twice as many chunks contain one):
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean first 16 | Mean all 32 | Endpoint | Jaw acc. | Flips predicted | Flip timing |
+|---|---|---|---|---|---|---|---|---|---|
+| All | 11,601 | 1.66 / 1.42 / 3.82 mm | 69.7% | 3.30 mm | 3.35 mm | 4.44 mm | 0.9979 | 4,627 of 4,636 | median 0, p95 3 rows |
+| Stationary | 1,957 | 1.78 / 1.61 / 3.52 mm | 64.9% | 6.40 mm | 6.70 mm | 9.47 mm | 0.9975 | 219 of 219 | median 0, p95 6 rows |
+| Moving | 9,644 | 1.63 / 1.38 / 3.85 mm | 70.6% | 2.67 mm | 2.67 mm | 3.43 mm | 0.9980 | 4,408 of 4,417 | median 0, p95 3 rows |
+
+Validation is the same (slot-1 1.67 mm, 68.8% within 2 mm, first-16 mean
+3.27 mm, jaw 0.9980). Ten steps change nothing. Future frame PSNR 32.3 dB.
+
+### Run A (`hanoi_cosmos_dense_20260920_libero_init`, LIBERO policy init, chunk 16)
+
+Per-export validation (every ninth row, 5 denoising steps):
+
+| Step | Slot-1 mm (all / stationary / moving) | Mean over slots | Endpoint | Jaw acc. |
+|---|---|---|---|---|
+| 1,000 | 19.64 / 18.37 / 19.91 | 13.41 | 24.99 | 0.9840 |
+| 2,000 | 8.26 / 8.71 / 8.17 | 7.69 | 10.66 | 0.9939 |
+| 3,000 | 3.60 / 3.28 / 3.67 | 5.97 | 8.97 | 0.9945 |
+| 4,000 | 2.98 / 2.84 / 3.02 | 5.07 | 7.07 | 0.9963 |
+| 5,000 | 2.72 / 2.31 / 2.81 | 4.70 | 6.96 | 0.9968 |
+| 6,000 | 2.08 / 1.89 / 2.12 | 4.49 | 6.55 | 0.9974 |
+| 7,000 | 2.24 / 1.92 / 2.30 | 4.60 | 6.03 | 0.9978 |
+| 8,000 | 2.26 / 1.95 / 2.32 | 4.12 | 6.25 | 0.9982 |
+| 9,000 | 1.74 / 1.44 / 1.81 | 3.85 | 5.46 | 0.9985 |
+| 10,000 | 1.70 / 1.58 / 1.73 | 3.89 | 5.58 | 0.9983 |
+| 11,000 | 1.77 / 1.60 / 1.81 | 3.96 | 5.38 | 0.9986 |
+| 12,000 | 1.75 / 1.37 / 1.83 | 3.63 | 5.56 | 0.9990 |
+| 13,000 | 1.81 / 1.72 / 1.83 | 3.81 | 5.52 | 0.9990 |
+| 14,000 | 1.14 / 0.89 / 1.19 | 3.30 | 4.83 | 0.9991 |
+| 15,000 | 1.54 / 1.33 / 1.58 | 3.38 | 5.09 | 0.9993 |
+| 16,000 | 1.33 / 1.16 / 1.36 | 3.28 | 4.91 | 0.9995 |
+
+Selected step 16,000, SHA-256
+`b677b20ff481fa214b181f43e47b9cbc12d42da5f12ee243b0b28928603b3342`.
+Test split (every third row, 11,601 scored, 5 all-padded rows skipped):
+
+| Subset | Rows | Slot-1 mean / median / p95 | Within 2 mm | Mean over slots | Endpoint | Jaw acc. | Flips predicted | Flip timing |
+|---|---|---|---|---|---|---|---|---|
+| All | 11,601 | 1.33 / 1.06 / 3.37 mm | 81.2% | 3.20 mm | 4.80 mm | 0.9993 | 2,314 of 2,321 | median 0, p95 3 rows |
+| Stationary | 1,957 | 1.16 / 0.96 / 2.77 mm | 87.3% | 6.59 mm | 11.57 mm | 0.9998 | 25 of 25 | median 0, p95 3 rows |
+| Moving | 9,644 | 1.36 / 1.09 / 3.46 mm | 79.9% | 2.50 mm | 3.43 mm | 0.9992 | 2,289 of 2,296 | median 0, p95 0 rows |
+
+Validation is the same (slot-1 1.32 mm, 81.4% within 2 mm, mean 3.18 mm, jaw
+0.9994). Ten steps change nothing. Future frame PSNR 31.7 dB.
+
+### What the comparisons say (test split, same rows)
+
+| Export | Updates | Slot-1 | Within 2 mm | Mean over 16 slots | Jaw acc. |
+|---|---|---|---|---|---|
+| Run B, video init, chunk 16 | 16,000 | 1.15 mm | 88.8% | 3.25 mm | 0.9994 |
+| Run A, LIBERO init, chunk 16 | 16,000 | 1.33 mm | 81.2% | 3.20 mm | 0.9993 |
+| Chunk 32, video init | 16,000 | 1.66 mm | 69.7% | 3.30 mm | 0.9979 |
+| Cycle 2, video init, chunk 16 | 32,000 | 0.81 mm | 95.6% | 2.84 mm | 0.9996 |
+
+- **Chunk length (decision 2).** At equal budget the 32-step chunk matches
+  the 16-step one on the mean over the shared 1.6 s but is 0.5 mm worse on
+  the first pose, with a p95 of 3.8 mm against 2.8 and 20 points fewer rows
+  within 2 mm, and its jaw accuracy is lower because the chunk spans twice as
+  many gripper events. The first pose is what the executor commits to, so the
+  16-step chunk stays the deployment choice.
+- **Initial weights (decision 7).** The LIBERO policy init is ahead early (2.1
+  against 2.45 mm at 6,000) and ends slightly behind on the first pose (1.33
+  against 1.15 mm) with the same chunk mean. The video base is confirmed as
+  the marginally better start; the difference is small next to the gain from
+  training longer.
+- **Budget (decision 8).** Cycle 2's second 16,000 updates gained more than
+  either variation: the deployable export remains cycle-2 step 16,000.
