@@ -1,0 +1,13 @@
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/exports/iter_000032000.pt
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/joint_contract.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/selection.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/selected_validation.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/selected_test.json
+data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init/dense_pipeline.json
+data/hanoi_cosmos/play_k5/dataset_statistics.json
+data/hanoi_cosmos/play_k5/metadata.json
+data/hanoi_cosmos/t5_embeddings_play.pkl
+data/hanoi_cosmos/t5_embeddings_play.json
+checkpoints/public/Wan2.1_VAE.pth
+checkpoints/public/manifest.json
+# selected export sha256 1544c36873db0c9f3fa40287133f3265e031ae40e8958c176c58e9e9ed4472c6 (3.9 GB); serve with cosmos_policy/experiments/robot/hanoi/serve_hanoi_play.py --checkpoint <export> --stats data/hanoi_cosmos/play_k5/dataset_statistics.json --embeddings data/hanoi_cosmos/t5_embeddings_play.pkl

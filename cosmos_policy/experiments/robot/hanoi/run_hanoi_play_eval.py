@@ -14,8 +14,9 @@ would fail while still scoring well on the metrics above (most rows of a move
 are the same whatever the goal):
 
 * matched-state goal decision test: pairs of decision rows with the same
-  current board, measured positions within 5 mm and different goal boards whose
-  labels differ by more than 5 mm over the shared valid slots; each row is
+  current board and motion stage, measured positions within 5 mm, different
+  goal boards whose labelled moves lead to different next boards, and labels
+  differing by more than 5 mm over the shared valid slots; each row is
   predicted under both sentences and scored against the label of the row whose
   sentence was used. Chance is 50%.
 * shuffled-goal sensitivity: decision rows predicted under their own sentence
@@ -52,20 +53,26 @@ def decision_rows(arrays):
 
 
 def matched_goal_pairs(arrays, rows, match_mm=MATCH_MM, decision_mm=DECISION_MM, max_per_board=None, rng=None):
-    """(row i, row j, label gap mm): same current board, positions within match_mm, different goals, labels differing by more than decision_mm."""
+    """(row i, row j, label gap mm): same current board and motion stage, positions within match_mm, different goals whose
+    labelled moves lead to different next boards, labels differing by more than decision_mm.
+
+    Same stage and different next board are what make the pair a goal decision: the first version of this probe paired an
+    approach with a transit at the same position, or two rows of the same move, where the labels differ for reasons the
+    observation alone explains (ring held or not, elapsed time), so the sentence could not matter."""
     pairs = []
-    boards = arrays['board_indices'][rows]
-    for board in np.unique(boards):
-        group = rows[boards == board]
+    keys = arrays['board_indices'][rows] * 100 + arrays['motion_stages'][rows]
+    for key in np.unique(keys):
+        group = rows[keys == key]
         if len(group) < 2:
             continue
         if max_per_board and len(group) > max_per_board:
             group = group[sorted((rng or np.random.default_rng(1)).choice(len(group), max_per_board, replace=False))]
         positions = arrays['cartesian_positions'][group]
         goals = arrays['goal_board_indices'][group]
+        following = arrays['next_board_indices'][group]
         distances = np.linalg.norm(positions[:, None, :] - positions[None, :, :], axis=2) * 1000
         for a in range(len(group)):
-            candidates = np.flatnonzero((distances[a] <= match_mm) & (goals != goals[a]))
+            candidates = np.flatnonzero((distances[a] <= match_mm) & (goals != goals[a]) & (following != following[a]))
             if not len(candidates):
                 continue
             b = int(candidates[np.argmin(distances[a][candidates])])

@@ -904,6 +904,54 @@ allocations, submitted September 30, 2026. The launcher qualifies first
 stages of 2,000 updates with a stride-27 validation pass after each export,
 selects by decision 11, and evaluates the selected export on validation and
 test at stride 9 with the goal probe.
+
+**Result (October 1, 2026).** Completed in three allocations (the second
+timed out inside the test pass, the third redid it from the locked
+selection). Selected export: step 32,000, the last and the best on every
+column (`exports/iter_000032000.pt`, SHA-256 1544c368...4472c6, 3.9 GB);
+transfer list `docs/hanoi_play_k5_cosmos_transfer.txt`. Still improving at the
+end, as the six-task run was before its second cycle.
+
+| Stage (validation, stride 27) | 2k | 4k | 8k | 12k | 16k | 20k | 24k | 28k | 32k |
+|---|---|---|---|---|---|---|---|---|---|
+| Slot-1 mm | 20.0 | 6.0 | 2.8 | 2.3 | 1.75 | 2.2 | 1.6 | 1.3 | 1.04 |
+| Mean over valid slots mm | 21.2 | 14.0 | 8.3 | 6.4 | 5.5 | 5.1 | 5.3 | 3.6 | 3.44 |
+| Decision rows slot-1 mm | 26.0 | 8.7 | 4.0 | 2.9 | 2.3 | 2.6 | 1.9 | 1.6 | 1.28 |
+
+Selected export, stride 9, five denoising steps (ten steps: identical to
+0.01 mm):
+
+| Rows | Validation slot-1 mm (within 2 mm) | Validation mean mm | Test slot-1 mm (within 2 mm) | Test mean mm |
+|---|---|---|---|---|
+| All (11,129 / 11,119) | 1.02 (92.2%) | 3.53 | 1.02 (91.8%) | 3.47 |
+| Stationary | 0.88 | 5.69 | 0.90 | 5.64 |
+| Moving | 1.05 | 3.03 | 1.05 | 2.96 |
+| Decision rows (approach, transit) | 1.26 (89.3%) | 4.43 | 1.25 (89.1%) | 4.16 |
+| Goal at graph distance 1 / 3 / 5 | 0.98 / 1.02 / 1.21 | 3.27 / 3.67 / 4.35 | 1.03 / 1.00 / 1.06 | 3.50 / 3.40 / 3.57 |
+
+Jaw accuracy 0.9992 validation and 0.9991 test, one missed flip in 2,076;
+endpoint error 5.6 mm; future-frame decode PSNR 31 dB; serving parity on 200
+observations 0.084 mm maximum against the 0.5 mm gate. Execution is at the
+six-task run's level after one cycle (that run: 0.80 mm after cycle 1, 0.60
+after cycle 2), and the error does not grow with the goal's distance.
+
+**Goal probe, first version: not interpretable.** The final pass reported a
+decision accuracy of 58% (validation) and 59% (test), from 95% correct under
+the row's own sentence and 20% to 25% under the other row's sentence. An
+offline check of the 64 pairs showed the pairing rule at fault: 43 pairs put
+an approach row next to a transit row at the same position (ring held or
+not, which the image shows, decides the chunk), and 32 pairs had both rows
+inside the same move, so their labels differed by elapsed time, not by the
+goal. The rule now requires the same motion stage and different next boards;
+it yields 16,535 validation pairs and 14,422 test pairs, mean label gap
+52 mm. The corrected probe runs as job 18972247 (`examples/hanoi/play_probe.py`,
+outputs `probe_v2_val.json` and `probe_v2_test.json` in the run directory);
+its result decides whether the policy reads the goal sentence at decision
+points. The shuffled-goal sensitivity from the final pass stands: a random
+other sentence moves the chunk by 11 mm on average but 0.2 mm at the median,
+against a redraw noise of 0.5 mm median, so on most decision rows the
+sentence changed nothing. The corrected probe reports the fraction of rows
+moved by more than 5 mm.
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
