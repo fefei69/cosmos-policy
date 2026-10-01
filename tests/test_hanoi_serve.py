@@ -179,3 +179,34 @@ def test_dreaming_server_returns_the_future_frame_and_value():
     finally:
         instance.stop()
         thread.join(5)
+
+
+def test_dense_server_play_identity_and_validators():
+    """The WebSocket server's play mode: contract seven, 81 board sentences, goal board echoed."""
+    from cosmos_policy.datasets.hanoi_play_data import DEPLOYMENT_CONTRACT_V7, PROMPT_TEMPLATE, PROMPTS_SHA256
+    from cosmos_policy.experiments.robot.hanoi import serve_dense
+
+    class FakePolicy:
+        identity = {"cosmos_hanoi": {
+            "action_horizon": 16, "contract": dict(DEPLOYMENT_CONTRACT_V7), "contract_name": "hanoi_play_k5_cosmos_v1",
+            "checkpoint": "run/exports/iter_000032000.pt", "prompt_template": PROMPT_TEMPLATE, "prompts_sha256": PROMPTS_SHA256,
+            "export_sha256": "a" * 64, "normalization_sha256": "b" * 64, "embeddings_sha256": "c" * 64, "num_steps": 5,
+            "horizon_cap_moves": 5, "initial_weights_sha256": "d" * 64}}
+
+    metadata = serve_dense.build_play_metadata(FakePolicy(), seed=1, gpu="test")
+    block = metadata["hanoi_play"]
+    assert block["model"] == "cosmos_play" and block["config_name"] == "cosmos_hanoi_play_k5_h16"
+    assert block["contract"]["version"] == 7 and block["contract"]["execution_prefix"] == 8 and block["contract"]["action_horizon"] == 16
+    assert block["prompt"] is None and len(block["prompts"]) == 81 and block["boards"][0] == "AAAA" and block["horizon_cap_moves"] == 5
+    assert block["prompts"]["BAAA"] == "Goal: peg A holds rings 2, 3 and 4, peg B holds ring 1, peg C is empty."
+    assert block["training_contract"] == "hanoi_play_k5_cosmos_v1" and metadata["cosmos_hanoi"] is FakePolicy.identity["cosmos_hanoi"]
+    json.dumps(metadata)  # the identity must serialise for the client's server_metadata.json
+
+    prompts = tuple(block["prompts"].values())
+    request = {"observation/image": np.zeros((224, 224, 3), np.uint8), "observation/state": np.zeros(7, np.float32)}
+    assert serve_dense.validate_observation({**request, "prompt": prompts[5]}, prompts)["prompt"] == prompts[5]
+    for bad in ({}, {"prompt": "Move all four rings from peg A to peg C following Tower of Hanoi rules."}):
+        with pytest.raises(ValueError, match="81 trained prompts"):
+            serve_dense.validate_observation({**request, **bad}, prompts)
+    reply = serve_dense.make_reply_validator(16, 8)({"actions": np.zeros((16, 4), np.float32), "goal_board": "BAAA", "execution_prefix": 8})
+    assert reply["goal_board"] == "BAAA" and reply["actions"].shape == (16, 4) and "task_direction" not in reply

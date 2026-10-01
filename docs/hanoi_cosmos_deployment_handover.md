@@ -364,3 +364,20 @@ frames 5 to 8 (current image) and 17 to 20 (predicted future) carry pictures;
 the other slots hold the injected joint state, waypoints and value and decode
 to black by design. On the 5080, `iter_000008000.pt` predicts the frame about
 21 s ahead at 2.5 mean absolute error versus 19 for copying the current frame.
+
+## 9. Play export on the arm (contract seven)
+
+The play-trained export `hanoi_cosmos_play_20260930_video_init` (step 32,000, weights SHA-256 `1544c368…72c6`) is
+served to the OpenPI dense client over the same WebSocket protocol as the dense and six-task exports:
+
+```bash
+.venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --play
+```
+
+The identity block is `hanoi_play`: the deployment contract at version 7, the 81 boards and their sentences
+(`prompts`, board to sentence), and the export, normalisation and embedding hashes. Every request must carry one of
+the 81 sentences verbatim; the reply echoes `goal_board`. The cluster's HTTP server (`serve_hanoi_play.py`) is not
+used on the arm. The client side (goal board by `--distance`, protocol A or C by `--goal-protocol`, the trial rules
+and the scoreboard) is described in the OpenPI checkout's `examples/hanoi/deployment/README.md` and follows
+`docs/hanoi_play_arm_protocol.md`. `joint_policy.py` differs from the hash in the run's contract only by the
+optional dream output added for the waypoint server; the play path imports `make_joint_observation`, which is unchanged.
