@@ -16,6 +16,7 @@ from pathlib import Path
 import numpy as np
 
 from cosmos_policy.datasets.hanoi_dense_data import EXECUTION_PREFIX, HORIZON, REFERENCE_RATE_HZ
+from cosmos_policy.datasets.hanoi_first_move_data import CONTRACT_H1
 from cosmos_policy.datasets.hanoi_joint_data import sha256
 from cosmos_policy.datasets.hanoi_play_data import (
     BOARD_BY_PROMPT, BOARDS, CONTRACT, DEFAULT_EMBEDDINGS, DEPLOYMENT_CONTRACT_V7, PROMPT_TEMPLATE, PROMPTS, PROMPTS_SHA256,
@@ -25,6 +26,9 @@ from cosmos_policy.datasets.hanoi_play_dataset import load_prompt_embeddings
 from cosmos_policy.experiments.robot.hanoi.dense_policy import HanoiDenseInferenceConfig, threshold_jaw, validate_dense_config
 from cosmos_policy.experiments.robot.hanoi.joint_policy import make_joint_observation
 from cosmos_policy.experiments.robot.hanoi.policy import load_hanoi_weights
+
+
+CONTRACTS = (CONTRACT, CONTRACT_H1)  # the play walks and the one-move expert set share the goal-sentence interface
 
 
 @dataclass
@@ -48,7 +52,7 @@ def validate_checkpoint_contract(checkpoint, stats_path, embeddings_path):
         path = path.parent
     run = path.parent.parent  # run/checkpoints/iter_* OR run/exports/iter_*.pt
     identity = json.loads((run / 'joint_contract.json').read_text())
-    if identity['contract'] != CONTRACT or sha256(stats_path) != identity['statistics_sha256']:
+    if identity['contract'] not in CONTRACTS or sha256(stats_path) != identity['statistics_sha256']:
         raise ValueError('Checkpoint and normalization belong to a different observation/action contract')
     if identity.get('prompts_sha256') != PROMPTS_SHA256 or identity.get('embeddings_sha256') != sha256(embeddings_path):
         raise ValueError('Checkpoint was trained with different goal sentences or a different embedding cache')
@@ -125,7 +129,7 @@ class HanoiPlayPolicy:
         export = Path(cfg.ckpt_path).resolve()
         self.identity = {
             'cosmos_hanoi': {
-                'contract': dict(DEPLOYMENT_CONTRACT_V7), 'contract_name': CONTRACT,
+                'contract': dict(DEPLOYMENT_CONTRACT_V7), 'contract_name': self.checkpoint_identity['contract'],
                 'prompt_template': PROMPT_TEMPLATE, 'prompts_sha256': PROMPTS_SHA256, 'goal_sentences': len(PROMPTS),
                 'boards': list(BOARDS), 'action_horizon': cfg.chunk_size,
                 'export_sha256': sha256(export) if export.is_file() else None, 'checkpoint': str(export),

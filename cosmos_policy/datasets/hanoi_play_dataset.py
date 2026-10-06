@@ -1,6 +1,8 @@
 """Cosmos latent-slot samples over the play labels (contract hanoi_play_k5).
 
-Same seven-slot packing and dense-v5 chunk geometry as HanoiDenseDataset.
+Same seven-slot packing and dense-v5 chunk geometry as HanoiDenseDataset. Also
+reads the one-move expert archive (contract hanoi_expert6_h1), which has the
+same schema with six source recordings.
 Differences: rows come from two recordings (the play walks, the expert clips),
 each read through its own handle, and the conditioning prompt is the row's
 goal-board sentence, so ``t5_text_embeddings`` is one of 81 cached embeddings.
@@ -21,9 +23,11 @@ import torch
 from cosmos_policy.datasets.hanoi_data import normalize
 from cosmos_policy.datasets.hanoi_dense_data import FRAMESKIP, HORIZONS
 from cosmos_policy.datasets.hanoi_dense_dataset import HanoiDenseDataset
+from cosmos_policy.datasets.hanoi_first_move_data import CONTRACT_H1, H1_FILE_ROLES
 from cosmos_policy.datasets.hanoi_joint_data import read_archive, sha256
 from cosmos_policy.datasets.hanoi_play_data import BOARDS, CONTRACT, DEFAULT_EMBEDDINGS, DEFAULT_METADATA, FILES, PROMPTS, PROMPTS_SHA256
 
+KNOWN_CONTRACTS = {CONTRACT: FILES, CONTRACT_H1: H1_FILE_ROLES}  # contract -> role of each source file, by file index
 ARCHIVE_COLUMNS = ('source_observation_indices', 'states', 'actions', 'actions_is_pad', 'source_action_indices', 'episode_indices',
                    'source_episode_bounds', 'segment_bounds', 'file_indices', 'segment_kinds', 'move_indices', 'motion_stages',
                    'board_indices', 'goal_board_indices', 'next_board_indices', 'goal_end_rows', 'goal_moves_ahead',
@@ -61,7 +65,8 @@ class HanoiPlayDataset(HanoiDenseDataset):
             raise ValueError('Representative ordering is only for validation')
         root = Path(metadata_dir)
         self.metadata = json.loads((root / 'metadata.json').read_text())
-        if self.metadata['contract'] != CONTRACT or (root / 'PREPARATION_FAILED').exists():
+        self.contract = self.metadata['contract']
+        if self.contract not in KNOWN_CONTRACTS or (root / 'PREPARATION_FAILED').exists():
             raise ValueError('Wrong/incomplete play dataset contract')
         self.horizon = int(self.metadata['horizon'])
         if self.horizon not in HORIZONS or self.metadata['frameskip'] != FRAMESKIP:
@@ -70,8 +75,8 @@ class HanoiPlayDataset(HanoiDenseDataset):
         if self.metadata['prompts_sha256'] != PROMPTS_SHA256 or self.metadata['prompts'] != list(PROMPTS):
             raise ValueError('Prepared goal sentences differ from this code')
         files = sorted(self.metadata['files'], key=lambda f: f['index'])
-        if [(f['index'], f['role']) for f in files] != list(enumerate(FILES)):
-            raise ValueError('Prepared file table does not cover the play and expert recordings once each')
+        if [(f['index'], f['role']) for f in files] != list(enumerate(KNOWN_CONTRACTS[self.contract])):
+            raise ValueError('Prepared file table does not list this contract\'s recordings once each')
         self.sources = []
         for record in files:
             source = Path(record['path'])
@@ -106,7 +111,7 @@ class HanoiPlayDataset(HanoiDenseDataset):
                       for ep in np.unique(self.arrays['episode_indices'])]
             self.order = np.array([group[i] for i in range(max(map(len, groups))) for group in groups if i < len(group)])
         self.resume_data_order_identity = {
-            'contract': CONTRACT, 'metadata_sha256': sha256(root / 'metadata.json'),
+            'contract': self.contract, 'metadata_sha256': sha256(root / 'metadata.json'),
             'indices_sha256': sha256(path), 'statistics': self.stats, 'split': split,
             'representative_order': representative_order, 'gamma': gamma,
             'embeddings_sha256': sha256(t5_text_embeddings_path),

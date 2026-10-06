@@ -23,6 +23,7 @@ import time
 from cosmos_policy.config.hanoi_dense_config import microbatch_from_env
 from cosmos_policy.config.hanoi_play_config import EXPERIMENT, MAX_UPDATES, SAVE_EVERY
 from cosmos_policy.datasets.hanoi_dense_data import HORIZON
+from cosmos_policy.datasets.hanoi_first_move_data import CONTRACT_H1
 from cosmos_policy.datasets.hanoi_joint_data import sha256
 from cosmos_policy.datasets.hanoi_play_data import CONTRACT, DEFAULT_EMBEDDINGS, DEFAULT_METADATA, PROMPTS, PROMPTS_SHA256
 from cosmos_policy.utils.hanoi_checkpoint import checkpoint_iteration, latest_complete_checkpoint
@@ -33,12 +34,17 @@ from examples.hanoi.run_pilot import execute_before
 
 ACCEPTED_GPUS = ('H100', 'H200')
 DATE = '20260930'
+H1_DATE = '20261006'
+RUN_PREFIXES = {CONTRACT: 'hanoi_cosmos_play_', CONTRACT_H1: 'hanoi_cosmos_h1_'}
 INITS = {
     'libero': {'format': 'policy', 'default_path': 'checkpoints/public/Cosmos-Policy-LIBERO-Predict2-2B.pt', 'run': 'L'},
     'video': {'format': 'video_base', 'default_path': 'checkpoints/public/model-480p-16fps.pt', 'run': 'V'},
 }
-STAGE_EVAL = {'stride': 27, 'steps': 5}          # every export: about 3,700 validation rows across the ten held-out walks
-FINAL_EVAL = {'stride': 9, 'steps': 5, 'also_steps': 10, 'probe_rows': 64}  # selected export: about 11,000 rows, both step counts, goal probe
+# Play defaults: every export about 3,700 validation rows across the ten held-out walks; selected export about 11,000 rows,
+# both step counts, goal probe. The one-move expert set is 30 times smaller and sets denser strides by environment.
+STAGE_EVAL = {'stride': int(os.environ.get('HANOI_PLAY_STAGE_STRIDE', '27')), 'steps': 5}
+FINAL_EVAL = {'stride': int(os.environ.get('HANOI_PLAY_FINAL_STRIDE', '9')), 'steps': 5, 'also_steps': 10, 'probe_rows': 64}
+QUALIFY_STRIDE = int(os.environ.get('HANOI_PLAY_QUALIFY_STRIDE', '900'))
 CODE_PATHS = (
     'cosmos_policy/datasets/hanoi_play_data.py', 'cosmos_policy/datasets/hanoi_play_dataset.py',
     'cosmos_policy/config/hanoi_play_config.py', 'cosmos_policy/experiments/robot/hanoi/play_policy.py',
@@ -58,8 +64,8 @@ CODE_PATHS = (
 )
 
 
-def run_name_for(init):
-    return f'hanoi_cosmos_play_{DATE}_{init}_init'
+def run_name_for(init, contract=CONTRACT):
+    return f'{RUN_PREFIXES[contract]}{H1_DATE if contract == CONTRACT_H1 else DATE}_{init}_init'
 
 
 def main():
@@ -70,15 +76,16 @@ def main():
     args = parser.parse_args()
     os.environ['HANOI_DENSE_HORIZON'] = str(HORIZON)  # chunk 16; before any import of cosmos_policy.constants; inherited by train/eval
     init = INITS[args.init]
-    run_name = args.run_name or os.environ.get('HANOI_PLAY_RUN_NAME') or run_name_for(args.init)
-    if not run_name.startswith('hanoi_cosmos_play_') or Path(run_name).name != run_name:
-        raise ValueError('Use a distinct hanoi_cosmos_play_* run name')
     root = Path(__file__).resolve().parents[2]
     metadata = Path(os.environ.get('HANOI_PLAY_METADATA', str(root / DEFAULT_METADATA))).resolve()
     embeddings = Path(os.environ.get('HANOI_PLAY_EMBEDDINGS', str(root / DEFAULT_EMBEDDINGS))).resolve()
     prepared = json.loads((metadata / 'metadata.json').read_text())
-    if prepared['contract'] != CONTRACT:
+    contract = prepared['contract']
+    if contract not in RUN_PREFIXES:
         raise ValueError('Wrong prepared task')
+    run_name = args.run_name or os.environ.get('HANOI_PLAY_RUN_NAME') or run_name_for(args.init, contract)
+    if not run_name.startswith(RUN_PREFIXES[contract]) or Path(run_name).name != run_name:
+        raise ValueError(f'Use a distinct {RUN_PREFIXES[contract]}* run name')
     if int(prepared['horizon']) != HORIZON:
         raise ValueError(f'Prepared dataset horizon {prepared["horizon"]} differs from the chunk of {HORIZON}')
     if prepared['prompts_sha256'] != PROMPTS_SHA256 or prepared['prompts'] != list(PROMPTS):
@@ -108,11 +115,11 @@ def main():
     os.environ.setdefault('HANOI_DENSE_MICROBATCH', '16')
     os.environ.setdefault('HANOI_DENSE_ACTIVATION_CHECKPOINT', 'none')
     print(f'Hashing initial weights {initial.name}...', flush=True)
-    identity = {'contract': CONTRACT, 'horizon': HORIZON, 'horizon_cap_moves': int(prepared['horizon_cap_moves']), 'goal_seed': int(prepared['goal_seed']),
+    identity = {'contract': contract, 'horizon': HORIZON, 'horizon_cap_moves': int(prepared['horizon_cap_moves']), 'goal_seed': int(prepared['goal_seed']),
                 'metadata_sha256': sha256(metadata / 'metadata.json'),
                 'prompts_sha256': PROMPTS_SHA256, 'goal_sentences': len(PROMPTS), 'embeddings_sha256': sha256(embeddings),
                 'statistics_sha256': prepared['statistics_sha256'],
-                'raw_sha256': {f['role']: f['sha256'] for f in prepared['files']}, 'manifest_sha256': prepared['manifest']['sha256'],
+                'raw_sha256': {f['role']: f['sha256'] for f in prepared['files']}, 'manifest_sha256': prepared.get('manifest', {}).get('sha256'),
                 'initial_weights': str(initial), 'initial_weights_sha256': sha256(initial), 'initial_weights_format': init['format'],
                 'run_label': init['run'], 'effective_batch_size': 32,
                 'microbatch': microbatch_from_env(), 'activation_checkpoint': os.environ['HANOI_DENSE_ACTIVATION_CHECKPOINT'],
@@ -228,7 +235,7 @@ def main():
             if checkpoint_iteration(checkpoint) != 3:
                 raise RuntimeError('Qualification requires exactly three completed updates after the step-two resume')
             exported = export(checkpoint)
-            result = evaluate(exported, run / 'qualification_validation.json', stride=900, steps=5, parity=8,
+            result = evaluate(exported, run / 'qualification_validation.json', stride=QUALIFY_STRIDE, steps=5, parity=8,
                               parity_tolerance=QUALIFICATION_PARITY_TOLERANCE_MM)
             if not result.get('serving_parity_passed'):
                 raise RuntimeError('Serving parity qualification failed')

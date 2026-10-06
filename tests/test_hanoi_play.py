@@ -28,7 +28,7 @@ def random_route(rng, start, moves):
     return route
 
 
-def make_play_raw(path, walks=125, moves=2, start='AAAA', direction=None, failed=(), seed=3):
+def make_play_raw(path, walks=125, moves=2, start='AAAA', direction=None, failed=(), seed=3, restart=False):
     """A synthetic coverage recording: ``walks`` walks of ``moves`` legal moves plus one terminal hold row each."""
     rng = np.random.default_rng(seed)
     rows_per_walk = ROWS_PER_MOVE * moves + 1
@@ -38,7 +38,7 @@ def make_play_raw(path, walks=125, moves=2, start='AAAA', direction=None, failed
     routes = {}
     current = start
     for w in range(walks):
-        route = random_route(rng, current, moves); routes[w] = route
+        route = random_route(rng, start if restart else current, moves); routes[w] = route  # expert episodes restart from the stack
         base = w * rows_per_walk
         for m in range(moves):
             for k in range(ROWS_PER_MOVE):
@@ -241,3 +241,52 @@ def test_config_and_launcher_import(monkeypatch):
     launcher = importlib.import_module('examples.hanoi.run_play')
     assert launcher.run_name_for('video') == 'hanoi_cosmos_play_20260930_video_init'
     assert 'cosmos_policy/datasets/hanoi_play_data.py' in launcher.CODE_PATHS and launcher.STAGE_EVAL['stride'] == 27
+
+
+def test_first_move_archive_and_loader(tmp_path, monkeypatch):
+    """The one-move expert contract: six recordings, the first move of each episode, goal = the board after it, read by the play loader."""
+    from dataclasses import replace
+    from cosmos_policy.datasets import hanoi_first_move_data as h1
+    from cosmos_policy.datasets.hanoi_multitask_data import TASKS
+    tasks = []
+    for task in TASKS:
+        path, routes = make_play_raw(tmp_path / f'{task.direction}.h5', walks=10, moves=2, start=task.start * 4, direction=task.direction, seed=task.index, restart=True)
+        with h5py.File(path, 'a') as h:
+            del h['goal_board']
+            h['goal_board'] = np.full((h['pixels'].shape[0], 4), 'ABC'.index(task.goal), np.int8)
+        tasks.append(replace(task, file=str(path)))  # RAW_ROOT / absolute path is the absolute path
+    monkeypatch.setattr(h1, 'TASKS', tuple(tasks))
+    out = tmp_path / 'expert6_h1'
+    metadata = h1.prepare(out, reference=tmp_path / 'no_reference', tasks=tuple(tasks))
+    assert metadata['contract'] == h1.CONTRACT_H1 and metadata['horizon_cap_moves'] == 1 and metadata['reference_cross_check']['status'] == 'absent'
+    assert [f['role'] for f in metadata['files']] == list(h1.H1_FILE_ROLES)
+    assert metadata['splits']['train']['moves'] == 48 and metadata['splits']['val']['moves'] == 6 and metadata['splits']['test']['moves'] == 6
+    with np.load(out / 'train.npz') as z:
+        assert (z['goal_moves_ahead'] == 0).all() and (z['move_indices'] == 0).all() and set(z['motion_stages'].tolist()) <= set(range(1, 10))
+        assert np.array_equal(z['goal_board_indices'], z['next_board_indices']) and np.array_equal(z['task_indices'], z['file_indices'])
+        for i in range(0, len(z['states']), 11):  # the chunk is cut at the move's last usable row
+            row, end = int(z['source_observation_indices'][i]), int(z['goal_end_rows'][i])
+            np.testing.assert_array_equal(z['actions_is_pad'][i], row + FRAMESKIP * np.arange(1, HORIZON + 1) > end)
+        # every case starts from a full stack and moves ring 1 only
+        for b, g in set(zip(z['board_indices'][z['goal_graph_distance'] == 1].tolist(), z['goal_board_indices'][z['goal_graph_distance'] == 1].tolist())):
+            assert BOARDS[b] in FULL_STACKS and BOARDS[g][1:] == BOARDS[b][1:] and BOARDS[g][0] != BOARDS[b][0]
+    embeddings = tmp_path / 'embeddings.pkl'
+    with embeddings.open('wb') as f:
+        pickle.dump({prompt: torch.full((1, 512, 1024), float(i + 1), dtype=torch.bfloat16) for i, prompt in enumerate(PROMPTS)}, f)
+    ds = HanoiPlayDataset(out, embeddings, split='val')
+    assert ds.contract == h1.CONTRACT_H1 and len(ds) == metadata['splits']['val']['samples'] and len(ds.sources) == 6
+    item = ds[0]
+    assert item['video'].shape == (3, 25, 224, 224) and float(item['t5_text_embeddings'][0, 0]) == int(item['goal_board_index']) + 1
+    ds.close()
+    # the reference comparison reports a match against an identical archive and a mismatch against a changed one
+    reference = tmp_path / 'reference'; reference.mkdir()
+    (reference / 'metadata.json').write_text('{}')
+    splits = {}
+    for split in ('train', 'val', 'test'):
+        with np.load(out / f'{split}.npz') as z:
+            splits[split] = {k: z[k].copy() for k in z.files}
+        np.savez(reference / f'{split}.npz', prompts=np.array(PROMPTS), **splits[split])
+    report = h1.cross_check(reference, splits)
+    assert {s['status'] for s in report['splits'].values()} == {'match'}
+    splits['val']['states'][0, 0] += 1
+    assert h1.cross_check(reference, splits)['splits']['val']['status'] == 'mismatch'
