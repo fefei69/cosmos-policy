@@ -977,6 +977,37 @@ review flagged, now measured. It does not change the execution numbers, and
 it is exactly what the arm test must separate: the execution control (the
 same policy given the next-board sentence) will show whether single moves
 follow the sentence when the goal is one move away.
+### 6.13 One-move expert run (six tasks, H1)
+
+October 6, 2026, at the user's request: an easy version, the first move of
+each of the six tower tasks (ring 1 off a full stack; AAAA to BAAA or CAAA,
+BBBB to ABBB or CBBB, CCCC to ACCC or BCCC) from the six expert recordings
+with the six-task split, 48 / 6 / 6 one-move episodes, 24,636 / 3,117 / 3,074
+rows. Not a composition test: every case is demonstrated eight times. It
+measures whether the goal-sentence interface works on expert data, the
+execution control for the play run; two cases share each start board, so the
+sentence alone decides peg B or C, the decision the six-task probe scored at
+97%.
+
+The V-JEPA side built the same set (`/scratch/cw5167/checkpoints/vjepa2_ac_hanoi/data/expert6_first_move`).
+Checked against the raw recordings and the six-task archive: every claim in
+its handover holds (rows, cases, the move as stages 1 to 9, goal at the
+retreat row, labels and cut, hashes) except "the Cosmos loader reads it
+unchanged"; it follows the pi0.5 column names and lacks the Cosmos contract,
+file identities, statistics and three audit columns. The Cosmos archive is
+built by `cosmos_policy/datasets/hanoi_first_move_data.py` into
+`data/hanoi_cosmos/expert6_h1` (contract `hanoi_expert6_h1_cosmos_v1`) and
+matches theirs row for row on all three splits (rows, states, labels, pads,
+target rows, goal rows, goal boards, stages; recorded in the metadata). The
+play loader, policy, config and launcher accept the contract; the settings
+are pinned in `examples/hanoi/train_h1.sbatch`: 8,000 updates, export every
+1,000, stage validation on every third row, the selected export on every
+row. The budget is set by updates, not passes: the play and six-task runs
+both needed about 8,000 updates from the video base to get under 3 mm.
+Probe pairs available: 299 validation and 291 test, 281 and 276 of them in
+transit. Run `hanoi_cosmos_h1_20261006_video_init`, jobs 19263695 and
+19263696. pi0.5 handover: `docs/hanoi_expert6_h1_pi05_handover.md`.
+
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
