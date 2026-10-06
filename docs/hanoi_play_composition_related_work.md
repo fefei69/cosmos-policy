@@ -1055,6 +1055,15 @@ were read. The play policy's weak goal use is therefore a property of the
 play labels, where most rows are goal-insensitive and the labelled move
 often follows the walk rather than the goal, not of the sentence format.
 
+By-stage probe on the selected export (job 19285539, 128 pairs per split,
+`probe_v2_val.json` and `probe_v2_test.json` in the run directory): on the
+transit pairs, where the sentence decides between peg B and peg C, the policy
+is correct on 121 of 121 validation pairs and 120 of 120 test pairs under its
+own sentence and under the swapped sentence alike. The 7 and 8 approach
+pairs score at chance, as they must: both cases approach the same ring and
+their labels differ only by the recordings' timing noise. Overall 97.3% and
+96.9%.
+
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
