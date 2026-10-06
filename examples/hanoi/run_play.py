@@ -47,6 +47,7 @@ FINAL_EVAL = {'stride': int(os.environ.get('HANOI_PLAY_FINAL_STRIDE', '9')), 'st
 QUALIFY_STRIDE = int(os.environ.get('HANOI_PLAY_QUALIFY_STRIDE', '900'))
 CODE_PATHS = (
     'cosmos_policy/datasets/hanoi_play_data.py', 'cosmos_policy/datasets/hanoi_play_dataset.py',
+    'cosmos_policy/datasets/hanoi_first_move_data.py', 'cosmos_policy/datasets/hanoi_multitask_data.py',
     'cosmos_policy/config/hanoi_play_config.py', 'cosmos_policy/experiments/robot/hanoi/play_policy.py',
     'cosmos_policy/experiments/robot/hanoi/run_hanoi_play_eval.py', 'examples/hanoi/run_play.py',
     'cosmos_policy/experiments/robot/hanoi/run_hanoi_multitask_eval.py',
