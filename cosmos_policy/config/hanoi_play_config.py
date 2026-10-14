@@ -26,8 +26,10 @@ from cosmos_policy.datasets.hanoi_play_dataset import HanoiPlayDataset
 from cosmos_policy.models.hanoi_dense_model import HanoiDensePolicyModel
 from cosmos_policy.utils.hanoi_waypoint_training import HanoiWaypointTrainingMonitor
 
-MAX_UPDATES = 32000
-SAVE_EVERY = 2000
+MAX_UPDATES = int(os.environ.get('HANOI_PLAY_MAX_UPDATES', '32000'))  # the one-move expert run sets a smaller budget
+SAVE_EVERY = int(os.environ.get('HANOI_PLAY_SAVE_EVERY', '2000'))
+if MAX_UPDATES < 20 or SAVE_EVERY < 1 or MAX_UPDATES % SAVE_EVERY:
+    raise ValueError('HANOI_PLAY_MAX_UPDATES must be a multiple of HANOI_PLAY_SAVE_EVERY')
 VALIDATION_EVERY = 500
 EXPERIMENT = 'cosmos_predict2_2b_hanoi_play'
 

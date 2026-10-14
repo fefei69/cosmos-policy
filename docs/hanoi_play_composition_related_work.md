@@ -977,6 +977,93 @@ review flagged, now measured. It does not change the execution numbers, and
 it is exactly what the arm test must separate: the execution control (the
 same policy given the next-board sentence) will show whether single moves
 follow the sentence when the goal is one move away.
+### 6.13 One-move expert run (six tasks, H1)
+
+October 6, 2026, at the user's request: an easy version, the first move of
+each of the six tower tasks (ring 1 off a full stack; AAAA to BAAA or CAAA,
+BBBB to ABBB or CBBB, CCCC to ACCC or BCCC) from the six expert recordings
+with the six-task split, 48 / 6 / 6 one-move episodes, 24,636 / 3,117 / 3,074
+rows. Not a composition test: every case is demonstrated eight times. It
+measures whether the goal-sentence interface works on expert data, the
+execution control for the play run; two cases share each start board, so the
+sentence alone decides peg B or C, the decision the six-task probe scored at
+97%.
+
+The V-JEPA side built the same set (`/scratch/cw5167/checkpoints/vjepa2_ac_hanoi/data/expert6_first_move`).
+Checked against the raw recordings and the six-task archive: every claim in
+its handover holds (rows, cases, the move as stages 1 to 9, goal at the
+retreat row, labels and cut, hashes) except "the Cosmos loader reads it
+unchanged"; it follows the pi0.5 column names and lacks the Cosmos contract,
+file identities, statistics and three audit columns. The Cosmos archive is
+built by `cosmos_policy/datasets/hanoi_first_move_data.py` into
+`data/hanoi_cosmos/expert6_h1` (contract `hanoi_expert6_h1_cosmos_v1`) and
+matches theirs row for row on all three splits (rows, states, labels, pads,
+target rows, goal rows, goal boards, stages; recorded in the metadata). The
+play loader, policy, config and launcher accept the contract; the settings
+are pinned in `examples/hanoi/train_h1.sbatch`: 8,000 updates, export every
+1,000, stage validation on every third row, the selected export on every
+row. The budget is set by updates, not passes: the play and six-task runs
+both needed about 8,000 updates from the video base to get under 3 mm.
+Probe pairs available: 299 validation and 291 test, 281 and 276 of them in
+transit. Run `hanoi_cosmos_h1_20261006_video_init`, jobs 19263695 and
+19263696. pi0.5 handover: `docs/hanoi_expert6_h1_pi05_handover.md`.
+
+**Result (October 6, 2026).** Completed in one allocation, 6 h 20 min.
+Selected export: step 8,000, the last and the best on every column
+(`exports/iter_000008000.pt`, SHA-256 9b3a898e...e1f0a6); transfer list
+`docs/hanoi_expert6_h1_cosmos_transfer.txt`; serve with
+`serve_hanoi_play.py` and `data/hanoi_cosmos/expert6_h1/dataset_statistics.json`.
+
+| Stage (validation, every third row) | 1k | 2k | 3k | 4k | 5k | 6k | 7k | 8k |
+|---|---|---|---|---|---|---|---|---|
+| Slot-1 mm | 7.6 | 2.8 | 2.3 | 1.9 | 1.5 | 1.5 | 1.5 | 1.11 |
+| Mean over valid slots mm | 6.7 | 4.6 | 3.7 | 3.2 | 2.7 | 3.2 | 2.9 | 2.22 |
+| Decision rows slot-1 mm | 10.2 | 3.2 | 2.7 | 2.1 | 1.9 | 1.7 | 1.9 | 1.35 |
+
+The narrow data converged faster than the larger runs (2.8 mm at 2,000
+updates against 14 to 20 mm), so the update count is not independent of the
+data as assumed when the budget was set; 2,000 updates would have given a
+usable 2.8 mm policy and 8,000 gave 1.1 mm.
+
+Selected export on every row, five denoising steps (ten steps identical):
+
+| Rows | Validation slot-1 mm (within 2 mm) | Validation mean mm | Test slot-1 mm (within 2 mm) | Test mean mm |
+|---|---|---|---|---|
+| All (3,099 / 3,057) | 1.08 (89.1%) | 2.28 | 1.05 (90.5%) | 2.24 |
+| Stationary | 0.79 | 3.83 | 0.76 | 3.42 |
+| Moving | 1.13 | 1.96 | 1.10 | 2.03 |
+| Decision rows | 1.30 | 2.11 | 1.23 | 2.10 |
+
+Jaw accuracy 0.9993 and 0.9992, no missed flip in 566 and 559; endpoint
+error 3.4 and 3.2 mm; future-frame PSNR 32 dB; serving parity on 199
+observations 0.074 mm maximum against the 0.5 mm gate.
+
+Goal probe from the final pass (64 matched pairs per split, the same start
+board, the other case's sentence): decision accuracy 96.1% on validation and
+on test (own sentence 95.3% and 96.9%, swapped sentence 96.9% and 95.3%); a
+swapped sentence moves the chunk by 24 mm, the full label gap. Side by side:
+
+| Model | Data | Goal probe |
+|---|---|---|
+| Six-task | expert, six task prompts | 97.8% / 97.0% |
+| One-move (this run) | expert first moves, goal sentences | 96.1% / 96.1% |
+| Play, k = 5 | play walks, goal sentences | 71% / 67% (swapped sentence 47% / 41%) |
+
+So the goal-sentence interface itself works: on expert data the same template
+and the same pipeline read the sentence as reliably as the six task prompts
+were read. The play policy's weak goal use is therefore a property of the
+play labels, where most rows are goal-insensitive and the labelled move
+often follows the walk rather than the goal, not of the sentence format.
+
+By-stage probe on the selected export (job 19285539, 128 pairs per split,
+`probe_v2_val.json` and `probe_v2_test.json` in the run directory): on the
+transit pairs, where the sentence decides between peg B and peg C, the policy
+is correct on 121 of 121 validation pairs and 120 of 120 test pairs under its
+own sentence and under the swapped sentence alike. The 7 and 8 approach
+pairs score at chance, as they must: both cases approach the same ring and
+their labels differ only by the recordings' timing noise. Overall 97.3% and
+96.9%.
+
 ## 7. Corrections to the interim list sent on September 30
 
 - World Action Planner trains on LIBERO-90 expert demonstrations, not play,
