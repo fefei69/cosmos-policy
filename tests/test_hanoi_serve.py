@@ -210,3 +210,19 @@ def test_dense_server_play_identity_and_validators():
             serve_dense.validate_observation({**request, **bad}, prompts)
     reply = serve_dense.make_reply_validator(16, 8)({"actions": np.zeros((16, 4), np.float32), "goal_board": "BAAA", "execution_prefix": 8})
     assert reply["goal_board"] == "BAAA" and reply["actions"].shape == (16, 4) and "task_direction" not in reply
+
+
+def test_dense_server_files_the_one_move_model_as_its_own_family():
+    from cosmos_policy.datasets.hanoi_play_data import DEPLOYMENT_CONTRACT_V7, PROMPT_TEMPLATE, PROMPTS_SHA256
+    from cosmos_policy.experiments.robot.hanoi import serve_dense
+
+    class FakePolicy:
+        identity = {"cosmos_hanoi": {
+            "action_horizon": 16, "contract": dict(DEPLOYMENT_CONTRACT_V7), "contract_name": serve_dense.H1_CONTRACT,
+            "checkpoint": "run/exports/iter_000008000.pt", "prompt_template": PROMPT_TEMPLATE, "prompts_sha256": PROMPTS_SHA256,
+            "export_sha256": "a" * 64, "normalization_sha256": "b" * 64, "embeddings_sha256": "c" * 64, "num_steps": 5}}
+
+    block = serve_dense.build_play_metadata(FakePolicy(), seed=1, gpu="test", h1=True)["hanoi_play"]
+    assert block["model"] == "cosmos_h1" and block["config_name"] == "cosmos_hanoi_expert6_h1_h16"
+    assert block["training_contract"] == "hanoi_expert6_h1_cosmos_v1" and len(block["prompts"]) == 81
+    assert serve_dense.build_play_metadata(FakePolicy(), seed=1, gpu="test")["hanoi_play"]["model"] == "cosmos_play"

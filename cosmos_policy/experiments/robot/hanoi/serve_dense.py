@@ -9,6 +9,7 @@ selects the export by ``config_name``. Run from the repository root in the Cosmo
     .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001              # single-task dense
     .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --multitask  # six tasks, prompt required
     .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --play       # play_k5, goal board sentence required
+    .venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --h1         # expert6_h1 (one move), same interface
 
 Request: ``observation/image`` (224, 224, 3) uint8, ``observation/state`` (7,) joint angles and jaw
 stroke, optional ``prompt``. Reply: ``actions`` (H, 4) float32 absolute XYZ and binary jaw intent at
@@ -38,6 +39,11 @@ PLAY_CONTRACT = "hanoi_play_k5_cosmos_v1"
 DEFAULT_PLAY_RUN = Path("data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_play_20260930_video_init")
 DEFAULT_PLAY_STATS = Path("data/hanoi_cosmos/play_k5/dataset_statistics.json")
 DEFAULT_PLAY_EMBEDDINGS = Path("data/hanoi_cosmos/t5_embeddings_play.pkl")
+# The one-move expert model (first move of the six tasks) speaks the play interface: a goal board sentence per request.
+H1_CONFIG_NAME = "cosmos_hanoi_expert6_h1_h{horizon}"
+H1_CONTRACT = "hanoi_expert6_h1_cosmos_v1"
+DEFAULT_H1_RUN = Path("data/hanoi_cosmos/runs/cosmos_policy/hanoi/hanoi_cosmos_h1_20261006_video_init")
+DEFAULT_H1_STATS = Path("data/hanoi_cosmos/expert6_h1/dataset_statistics.json")
 PROMPT = "Move all four rings from peg A to peg C following Tower of Hanoi rules."
 
 
@@ -134,8 +140,11 @@ def build_multitask_metadata(policy, *, seed: int, gpu: str, cycle: str) -> dict
     return {"hanoi_multitask": block, "cosmos_hanoi": identity}
 
 
-def build_play_metadata(policy, *, seed: int, gpu: str) -> dict:
-    """The hanoi_play identity the OpenPI dense client checks: contract seven with the 81 boards and their sentences."""
+def build_play_metadata(policy, *, seed: int, gpu: str, h1: bool = False) -> dict:
+    """The hanoi_play identity the OpenPI dense client checks: contract seven with the 81 boards and their sentences.
+
+    With ``h1`` the policy is the one-move expert model: same interface, filed as its own family (cosmos_h1).
+    """
     from cosmos_policy.datasets.hanoi_play_data import BOARDS, PROMPTS
 
     identity = policy.identity["cosmos_hanoi"]
@@ -143,8 +152,8 @@ def build_play_metadata(policy, *, seed: int, gpu: str) -> dict:
     contract = {**identity["contract"], "action_horizon": horizon, "joint_order": "trossen_arm_driver_arm_indices_0_to_5",
                 "conditioning": "goal board sentence only; one of 81 verbatim sentences is required on every request, no default goal"}
     block = {
-        "model": "cosmos_play",
-        "config_name": PLAY_CONFIG_NAME.format(horizon=horizon),
+        "model": "cosmos_h1" if h1 else "cosmos_play",
+        "config_name": (H1_CONFIG_NAME if h1 else PLAY_CONFIG_NAME).format(horizon=horizon),
         "checkpoint": identity["checkpoint"],
         "contract": contract,
         "prompt": None,
@@ -180,6 +189,8 @@ def main() -> None:
                         help="serve the six-task contract-six policy (defaults below switch to its export, stats and embeddings)")
     parser.add_argument("--play", action="store_true",
                         help="serve the play-trained goal-conditioned policy (contract seven; the goal board sentence is required)")
+    parser.add_argument("--h1", action="store_true",
+                        help="serve the one-move expert model (first move of the six tasks) through the same goal-sentence interface")
     parser.add_argument("--checkpoint", type=Path, default=None, help="default: the selected dense, six-task or play export")
     parser.add_argument("--stats", type=Path, default=None)
     parser.add_argument("--embeddings", type=Path, default=None)
@@ -190,16 +201,18 @@ def main() -> None:
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
 
-    if args.multitask and args.play:
-        raise ValueError("Choose --multitask or --play, not both")
+    if sum((args.multitask, args.play, args.h1)) > 1:
+        raise ValueError("Choose one of --multitask, --play and --h1")
     if args.checkpoint is None:
-        args.checkpoint = ((DEFAULT_PLAY_RUN / "exports/iter_000032000.pt") if args.play else
+        args.checkpoint = ((DEFAULT_H1_RUN / "exports/iter_000008000.pt") if args.h1 else
+                           (DEFAULT_PLAY_RUN / "exports/iter_000032000.pt") if args.play else
                            (DEFAULT_MULTITASK_RUN / "exports/iter_000032000.pt") if args.multitask else (DEFAULT_RUN / "exports/iter_000016000.pt"))
     run = args.checkpoint.resolve().parent.parent  # run/exports/iter_*.pt
     run_identity = json.loads((run / "joint_contract.json").read_text())
-    play = args.play or run_identity.get("contract") == PLAY_CONTRACT
+    h1 = args.h1 or run_identity.get("contract") == H1_CONTRACT
+    play = h1 or args.play or run_identity.get("contract") == PLAY_CONTRACT
     multitask = not play and (args.multitask or run_identity.get("contract") == MULTITASK_CONTRACT)
-    args.stats = args.stats or (DEFAULT_PLAY_STATS if play else DEFAULT_MULTITASK_STATS if multitask else DEFAULT_STATS)
+    args.stats = args.stats or (DEFAULT_H1_STATS if h1 else DEFAULT_PLAY_STATS if play else DEFAULT_MULTITASK_STATS if multitask else DEFAULT_STATS)
     args.embeddings = args.embeddings or (DEFAULT_PLAY_EMBEDDINGS if play else DEFAULT_MULTITASK_EMBEDDINGS if multitask else DEFAULT_EMBEDDINGS)
     horizon = int(run_identity.get("horizon", 16))
     # Platform constants bind at import time; set them before any cosmos_policy import.
@@ -218,9 +231,9 @@ def main() -> None:
 
         cfg = HanoiPlayInferenceConfig(str(args.checkpoint), str(args.stats), str(args.embeddings),
                                        num_denoising_steps_action=args.denoising_steps, chunk_size=horizon)
-        logging.info("Loading play %s (%d-step chunks)", args.checkpoint, horizon)
+        logging.info("Loading %s %s (%d-step chunks)", "one-move expert" if h1 else "play", args.checkpoint, horizon)
         policy = HanoiPlayPolicy(cfg)
-        metadata = build_play_metadata(policy, seed=args.seed, gpu=torch.cuda.get_device_name())
+        metadata = build_play_metadata(policy, seed=args.seed, gpu=torch.cuda.get_device_name(), h1=h1)
         identity = metadata["hanoi_play"]
         prompts = tuple(identity["prompts"].values())
     elif multitask:
@@ -245,12 +258,12 @@ def main() -> None:
     logging.info("Export SHA-256 %s, config %s", identity["export_sha256"], identity["config_name"])
     logging.info("Warm-up inference took %.2f s", warm_up(policy, args.seed, prompts[0]))
     if len(prompts) > 1:
-        logging.info("%s server: every request must carry one of %d verbatim prompts", "Play" if play else "Six-task", len(prompts))
+        logging.info("%s server: every request must carry one of %d verbatim prompts", "One-move" if h1 else "Play" if play else "Six-task", len(prompts))
     WaypointPolicyServer(
         policy, metadata, host=args.host, port=args.port, seed=args.seed,
         validate_observation=lambda observation: validate_observation(observation, prompts),
         validate_reply=make_reply_validator(horizon, int(identity["contract"]["execution_prefix"])),
-        name=f"Cosmos {'play' if play else 'six-task' if multitask else 'dense'} Hanoi policy ({horizon}-step chunks)",
+        name=f"Cosmos {'one-move' if h1 else 'play' if play else 'six-task' if multitask else 'dense'} Hanoi policy ({horizon}-step chunks)",
     ).serve_forever()
 
 

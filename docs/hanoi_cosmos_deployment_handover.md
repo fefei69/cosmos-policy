@@ -381,3 +381,17 @@ used on the arm. The client side (goal board by `--distance`, protocol A or C by
 and the scoreboard) is described in the OpenPI checkout's `examples/hanoi/deployment/README.md` and follows
 `docs/hanoi_play_arm_protocol.md`. `joint_policy.py` differs from the hash in the run's contract only by the
 optional dream output added for the waypoint server; the play path imports `make_joint_observation`, which is unchanged.
+
+## 10. One-move expert export on the arm (`hanoi_expert6_h1`)
+
+`hanoi_cosmos_h1_20261006_video_init` (step 8,000, weights SHA-256 `9b3a898e…f0a6`), trained on the first move of
+the six tasks under the play goal-sentence interface, is served the same way as the play export:
+
+```bash
+.venv/bin/python -m cosmos_policy.experiments.robot.hanoi.serve_dense --port 8001 --h1
+```
+
+It loads with the `expert6_h1` normalisation statistics and the play embeddings, keeps the 81-sentence check, and
+publishes the `hanoi_play` identity with model `cosmos_h1` and config `cosmos_hanoi_expert6_h1_h16`, so the client
+files its runs as their own family. On the arm it is run with `--distance 1`, which sends the sentence of the board
+one move along the task's path.
